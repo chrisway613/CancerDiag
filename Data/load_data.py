@@ -20,13 +20,14 @@ class CancerDataset(Dataset):
         """对标签mask进行编码
 
             Args:
-                raw_label (PIL Image): 将被编码的mask图像
+                raw_label (PIL Image): 将被编码的mask图像，共有0-9、246-255 20种像素值
 
             Returns:
                 PIL Image: Encoded mask.
         """
-        # uint8类型，保持与原图mask一致
-        label_arr = np.asarray(raw_label, dtype='uint8').copy()
+        # uint8类型
+        label_arr = np.asarray(raw_label).copy()
+        assert label_arr.dtype == np.uint8
         label_arr[label_arr < 10] = 0
         label_arr[label_arr > 245] = 255
         # 阴性样本的mask全0，阳性样本为0或255
@@ -70,6 +71,7 @@ class CancerDataset(Dataset):
             label_path = self.label_paths[index]
             label_name = os.path.basename(label_path)
             label = Image.open(label_path)
+            assert label.mode == 'L'
             # 将标签编码为两类，像素值仅有0和255，非黑即白
             label = self._encode_label(label)
             item = dict(image=image, label=label, image_name=image_name, image_size=size, label_name=label_name)
@@ -92,24 +94,40 @@ if __name__ == '__main__':
     #     print(image.size)
     #     print(image_size)
     #     print(image_name, label_name)
+    #     # RGB、L
+    #     print(image.mode, label.mode)
     #
     #     image.show()
     #     label.show()
     #
+    #     # 图像使用float32类型
     #     image_arr = np.asarray(image, dtype='float')
-    #     label_arr = np.asarray(label, dtype='uint8')
-    #     # (H, W, C)
+    #     # mask使用int32类型
+    #     label_arr = np.asarray(label, dtype='int')
+    #     # (H, W, 3)
     #     print(image_arr.shape)
+    #     # (H, W)
+    #     print(label_arr.shape)
     #     # 阴性样本为0，阳性样本为0和255
     #     print(np.unique(label_arr))
     #
     #     rs = Resize(TRAIN_SIZE)
     #     rs_data = rs(data)
     #     resized_image = rs_data.get('image')
+    #     # RGB
+    #     print(resized_image.mode)
     #     resized_label = rs_data.get('label')
+    #     # L
+    #     print(resized_label.mode)
+    #
     #     print(resized_image.size, resized_label.size)
+    #     assert resized_image.size == resized_label.size
+    #
     #     resized_image.show()
     #     resized_label.show()
+    #
+    #     # 图像是3维，mask是2维
+    #     assert np.asarray(resized_image).ndim == 3 and np.asarray(resized_label).ndim == 2
     #
     #     break
     #
@@ -137,9 +155,8 @@ if __name__ == '__main__':
 
         # (batch, channel, H, W)
         print(batch_images.shape, batch_labels.shape)
-        # float32, uint8
+        # float32, int32
         print(batch_images.dtype, batch_labels.dtype)
-
         print(batch_image_names)
         # 返回类似：[tensor([867, 954, 939, 942]), tensor([580, 633, 621, 625])]
         # 前一组tensor是原图的宽、后一组是原图的高

@@ -101,6 +101,7 @@ def mask_analysis(label_dir):
     sample_path = random.choice(label_paths)
     print("pick label sample {}".format(os.path.basename(sample_path)))
 
+    # 用opencv读默认是3通道
     sample_label = cv2.imread(sample_path)
     h, w, c = sample_label.shape
     # uint8类型
@@ -108,15 +109,18 @@ def mask_analysis(label_dir):
     # 3通道
     print("height:{}; width:{}; channel:{}".format(h, w, c))
 
-    # 发现有17种像素值，0-7，247-255
+    # mask并非二值的，发现有20种像素值，0-9，247-255
     print(np.unique(sample_label))
     show_image(sample_label, title='label', width=w, height=h)
 
-    # TODO: 检查mask总共有几种像素值
-
-    # TODO: 检查所有mask是否3通道
-
-    # TODO: 检查所有标注图像大小与对应的原始图像是否一致
+    # PIL读进来发现其实mask是单通道
+    sample_mask = Image.open(sample_path)
+    print(sample_mask)
+    # L
+    print(sample_mask.mode)
+    mask = np.asarray(sample_mask)
+    # 转换成numpy矩阵后是二维的，uint8类型
+    print(mask.shape, mask.dtype)
 
 
 def result_analysis(result_dir):
@@ -146,9 +150,10 @@ def gen_mask_for_negatives(label_dir, paths):
         label_path = os.path.join(label_dir, label_name)
 
         # 若是dtype='int'，则会变成int32类型，注意！
-        mask = np.zeros((h, w, 3), dtype=np.uint8)
-        print(mask.dtype)
+        mask = np.zeros((h, w), dtype=np.uint8)
+        assert mask.ndim == 2 and mask.dtype == np.uint8
         label = Image.fromarray(mask)
+        print(label.mode)
         label.save(label_path)
 
 
@@ -164,18 +169,18 @@ if __name__ == '__main__':
     root = 'Data/Train/Images'
     # 所有图像文件名称
     image_files = os.listdir(root)
-    # 随机挑选一张样本做分析
-    sample_file = random.choice(image_files)
-    print("pick sample:{}".format(sample_file))
-    sample_path = os.path.join(root, sample_file)
-    sample = Image.open(sample_path)
-    W, H = sample.size
-    # RGB
-    mode = sample.mode
-    print("width:{}; height:{}; mode:{}".format(W, H, mode))
-    # uint8类型
-    sample_arr = np.asarray(sample)
-    print(sample_arr.dtype)
+    # # 随机挑选一张样本做分析
+    # sample_file = random.choice(image_files)
+    # print("pick sample:{}".format(sample_file))
+    # sample_path = os.path.join(root, sample_file)
+    # sample = Image.open(sample_path)
+    # W, H = sample.size
+    # # RGB
+    # mode = sample.mode
+    # print("width:{}; height:{}; mode:{}".format(W, H, mode))
+    # # uint8类型
+    # sample_arr = np.asarray(sample)
+    # print(sample_arr.dtype)
     # sample.show()
 
     # image = cv2.cvtColor(np.asarray(sample), cv2.COLOR_RGB2BGR)
@@ -234,10 +239,11 @@ if __name__ == '__main__':
 
     # 为阴性样本生成标注mask
     # label_dir = 'Data/Train/Labels'
-    # neg_paths = image_paths[:1000]
+    # neg_paths = [path for path in image_paths if int(os.path.basename(path).split('.')[0]) < 1000]
+    # assert len(neg_paths) == 1000
     # gen_mask_for_negatives(label_dir, neg_paths)
 
-    # 标注图像分析
+    # 标注mask分析
     # label_dir = 'Data/Train/Labels'
     # mask_analysis(label_dir)
 

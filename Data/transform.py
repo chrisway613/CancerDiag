@@ -35,10 +35,6 @@ class Resize:
         return item
 
     def _resize(self, img, inter=None):
-        # 数据集中有部分mask不是3通道，需要进行转换
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-
         # 原始尺寸
         ori_w, ori_h = img.size
         # 目标尺寸
@@ -50,14 +46,22 @@ class Resize:
 
         if inter is None:
             inter = self.inter
+        # 保持原图宽、高比进行缩放
+        # 但注意这个尺寸不是目标尺寸
         resized_img = img.resize((val_w, val_h), inter)
         # float32类型
-        valid = np.asarray(resized_img, dtype='float32')
+        valid = np.asarray(resized_img, dtype='float')
 
-        img_arr = np.asarray(img, dtype='float32')
-        # 周边用原图各通道像素均值填充
-        pad = img_arr.mean(axis=(0, 1))
-        target_arr = np.zeros((tar_h, tar_w, 3))
+        img_arr = np.asarray(img, dtype='float')
+        # 图像是3维矩阵
+        if img_arr.ndim == 3:
+            # 各通道像素值均值
+            pad = img_arr.mean(axis=(0, 1))
+            target_arr = np.zeros((tar_h, tar_w, 3))
+        # mask是二维矩阵
+        else:
+            pad = img_arr.mean()
+            target_arr = np.zeros((tar_h, tar_w))
         target_arr[:, :] = pad
 
         # 中心区域维持原图宽、高比
@@ -66,6 +70,7 @@ class Resize:
         start_x = (tar_w - val_w) // 2
         end_x = start_x + val_w
         target_arr[start_y:end_y, start_x:end_x] = valid
+        # 还原成图像时注意转换会uint8类型
         target_img = Image.fromarray(target_arr.astype('uint8'))
 
         return target_img
@@ -110,8 +115,10 @@ class ToNormTensor:
             # uint8->int32
             # 使用.copy()，否则torch会出现warning
             mask_tensor = torch.from_numpy(np.asarray(mask, dtype='int').copy())
-            # (H, W, C) -> (C, H , W)
-            mask_tensor = mask_tensor.permute(2, 0, 1)
+            # (H, W) -> (1, H , W)
+            # 为mask增加1个对应通道的维度
+            mask_tensor = mask_tensor.unsqueeze(0)
+            assert mask_tensor.dim() == 3 and mask_tensor.shape[0] == 1
             item.update(label=mask_tensor)
 
         return item
