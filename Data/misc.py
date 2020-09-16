@@ -74,11 +74,22 @@ def draw_tiny_samples(weights, num, bs):
     wt_rand_sampler = WeightedRandomSampler(weights, len(ds), replacement=False)
     # 采一定数量的样本
     indices = []
-    for sample in wt_rand_sampler:
+    for i, sample in enumerate(wt_rand_sampler):
         # print(sample)
-        indices.append(sample)
+        if not indices:
+            indices.append(sample)
+        # 轮流采样阴阳样本，保证类别比例均衡
+        if indices[-1] < 1000 <= sample:
+            indices.append(sample)
+        elif indices[-1] >= 1000 > sample:
+            indices.append(sample)
+        else:
+            pass
+
+        # 数量足够则结束采样
         if len(indices) == num:
             break
+
     assert len(indices) == num
 
     # 将以上样本索引包装为sampler
@@ -99,3 +110,15 @@ def draw_tiny_samples(weights, num, bs):
     print("Draw {} batches of {} samples".format(len(dl), num))
 
     return dl
+
+
+def balanced_sample(train_img_paths, eval_img_paths, train_label_paths, eval_label_paths):
+    # TODO: 将全部阳性样本的路径保留，然后和阴性样本轮流加入到list中，直至阳性样本全部加入（多余的阴性样本抛弃）
+
+    # TODO: 利用采样好的路径构建Dataset，再用随机数生成器轮流生成阴阳样本的索引，加入到list(注意判断去重)直至长度和Dataset一致
+
+    # TODO: 实现SubsetSequentialSampler，封装以上采样的索引，并且将这个sampler作用于DataLoader
+
+    # TODO: 返回Dataset和Sampler
+
+    pass

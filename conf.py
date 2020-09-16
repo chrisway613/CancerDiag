@@ -23,13 +23,15 @@ TRAIN_SCALE_STD = [.218, .300, .200]
 TEST_MEAN = [209.849, 188.015, 208.279]
 TEST_STD = [53.722, 76.320, 50.763]
 
-EPOCHS = 64
-WARM_UP_EPOCH = 2
-BATCH_SIZE = 4
-BASE_LR = 1e-3
-MIN_LR = 1e-5
-WARM_UP_LR = 1e-4
+EPOCHS = 1000
+WARM_UP_EPOCH = 3
+BATCH_SIZE = 8
+BASE_LR = 1e-2
+MIN_LR = 1e-4
+WARM_UP_LR = 1e-3
 NUM_CLASSES = 1
+# 预测概率阀值
+THRESH = .5
 
 # 是否使用预训练权重
 PRETRAINED = False
@@ -40,11 +42,13 @@ CHECKPOINT = 'Weights'
 SYN_BN = False
 # 打印log的迭代周期
 LOG_CYCLE = 3
+# 可视化预测概率map的迭代周期
+VIS_CYCLE = 10
 # 训练过程中进行评估验证的周期
 TIME_TO_EVAL = 1
 # 是否进行小样本训练
 TINY_TRAIN = True
 # 少样本模式下的样本总数量
-TINY_NUM = 8
+TINY_NUM = 4
 # 少样本训练模式下的批次大小
-TINY_BATCH_SIZE = 4
+TINY_BATCH_SIZE = 2

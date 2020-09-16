@@ -8,6 +8,7 @@ import torch.nn as nn
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
+from torchvision.utils import make_grid
 from torchvision.transforms import Compose
 
 from conf import *
@@ -93,6 +94,8 @@ def load_data():
     print("batch size={}, {} batches in training set, {} batches in validation set\n".format(
         BATCH_SIZE, len(train_dl), len(eval_dl)))
 
+    # TODO: 验证每个batch都有阴阳样本
+
     return train_dl, eval_dl
 
 
@@ -134,9 +137,9 @@ def set_optim(net):
         params['lr'] = BASE_LR
 
     # 学习率策略
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, EPOCHS // 4, eta_min=MIN_LR)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, 10, eta_min=MIN_LR)
     # 动态调整的余弦退火，初始周期为4，即４个周期后restart为初始学习率，之后呈平方增长
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, 4, T_mult=2, eta_min=MIN_LR)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, 4, T_mult=2, eta_min=MIN_LR)
     return optim, scheduler
 
 
@@ -145,7 +148,7 @@ def set_lr(optim, lr):
         param_group['lr'] = lr
 
 
-def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev):
+def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev, wtr):
     # 一个训练周期的平均loss
     total_loss = 0.
     # 记录训练用时
@@ -155,7 +158,9 @@ def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev):
     progress = tqdm(train_dataloader)
     progress.set_description_str("Train Epoch[{}]".format(epoch + 1))
     for it, batch_data in enumerate(progress):
+        # (N,C,H,W)
         batch_images = batch_data.get('image').to(dev).float()
+        # (N,H,W)
         batch_labels = batch_data.get('label').to(dev).int()
 
         # 清空累积梯度
@@ -175,6 +180,25 @@ def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev):
             batch_image_names = batch_data.get('image_name')
             progress.set_postfix_str("Iter[{}]: loss={:.3f}, images:{}".format(it + 1, loss.item(), batch_image_names))
 
+        # 当前迭代次数＝周期x批次总数+当前批次
+        step = epoch * len(train_dataloader) + it
+        if step % VIS_CYCLE == 0:
+            batch_image_names = batch_data.get('image_name')
+            for output, label, name in zip(outputs, batch_labels, batch_image_names):
+                # 概率图, (1,H,W)->(1,1,H,W)
+                pred = torch.sigmoid(output).unsqueeze(0)
+                # 二值图，非0即1
+                binary_pred = torch.zeros_like(pred)
+                # 概率超过预测阀值的认为是阳性区域
+                binary_pred[pred >= THRESH] = 1
+
+                # 将预测结果和标注mask拼接在一起：(3,1,H,W)
+                # 注意标注mask要先从(H,W)变为(1,1,H,W)并且转换为float32类型
+                concat = torch.cat([pred, label.unsqueeze(0).unsqueeze(0).float(), binary_pred])
+                # padding是代表图像之间的间隔距离，.5代表使用灰色作为分隔颜色
+                image_grids = make_grid(concat, nrow=3, padding=3, pad_value=.5)
+                wtr.add_image('step{}-{}'.format(step, str(name)), image_grids, step)
+
     end_time = time.time()
     total_loss /= len(train_dataloader)
     print("Epoch[{}]: loss={}, time used:{:.3f}s".format(epoch + 1, total_loss, end_time - start_time))
@@ -183,7 +207,7 @@ def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev):
     return total_loss
 
 
-def eval(epoch, eval_dataloader, net, criteria_func, dev):
+def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
     # 平均loss
     total_loss = 0.
     # 平均dice
@@ -201,12 +225,14 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev):
         if torch.sum(batch_labels > 0) == 0:
             continue
 
+        batch_image_names = batch_data.get('image_name')
+        batch_images = batch_data.get('image').to(dev).float()
+
         # 该批次的阳性样本数量
         batch_pos_num = 0
         # 该批次阳性样本的平均loss和平均dice
         batch_loss = batch_metric = 0.
-        batch_images = batch_data.get('image').to(dev).float()
-        for image, label in zip(batch_images, batch_labels):
+        for image, label, name in zip(batch_images, batch_labels, batch_image_names):
             # 仅对阳性样本评估
             if torch.sum(label == 1) > 0:
                 # (C,H,W)->(1,C,H,W)
@@ -218,6 +244,20 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev):
                 batch_pos_num += 1
                 batch_loss += loss
                 batch_metric += cost
+
+                step = epoch * len(eval_dataloader) + it
+                if step % VIS_CYCLE == 0:
+                    # 概率图, (1,H,W)->(1,1,H,W)
+                    pred = torch.sigmoid(output).unsqueeze(0)
+                    # 二值图
+                    binary_pred = torch.zeros_like(pred)
+                    binary_pred[pred >= THRESH] = 1
+                    # (1,H,W)->(1,1,H,W)
+                    mask = label.unsqueeze(0).float()
+
+                    concat = torch.cat([pred, mask, binary_pred])
+                    image_grids = make_grid(concat, nrow=3, padding=3, pad_value=.5)
+                    wtr.add_image('step{}-{}'.format(step, name), image_grids, step)
 
         if it % LOG_CYCLE == 0:
             batch_image_names = batch_data.get('image_name')
@@ -252,7 +292,7 @@ if __name__ == '__main__':
         train_dl, eval_dl = load_data()
     else:
         # 少样本训练，以验证方法是否可靠
-        train_dl = draw_tiny_samples([1.] * 1000 + [.7] * 732, TINY_NUM, TINY_BATCH_SIZE)
+        train_dl = draw_tiny_samples([.7] * 1000 + [1.] * 732, TINY_NUM, TINY_BATCH_SIZE)
         eval_dl = None
 
     # 模型构建
@@ -272,7 +312,7 @@ if __name__ == '__main__':
         model.train()
 
         # 先使用小的学习率进行热身
-        if not TINY_TRAIN and epoch < WARM_UP_EPOCH:
+        if epoch < WARM_UP_EPOCH:
             set_lr(optimizer, WARM_UP_LR)
         # 预热一定周期后恢复初始学习率
         elif epoch == WARM_UP_EPOCH:
@@ -283,7 +323,7 @@ if __name__ == '__main__':
         print("Epoch[{}] lr={}".format(epoch + 1, lr))
 
         # 训练一个周期得到平均损失
-        epoch_loss = train_one_epoch(epoch, train_dl, model, optimizer, criterion, device)
+        epoch_loss = train_one_epoch(epoch, train_dl, model, optimizer, criterion, device, train_wtr)
         # 可视化loss曲线
         train_wtr.add_scalar('loss', epoch_loss, epoch)
 
@@ -292,7 +332,7 @@ if __name__ == '__main__':
             print("Start Evaluation of Epoch[{}]!".format(epoch + 1))
             # 设置模型为评估模式
             model.eval()
-            loss, metric = eval(epoch, eval_dl, model, criterion, device)
+            loss, metric = eval(epoch, eval_dl, model, criterion, device, eval_wtr)
             eval_wtr.add_scalar('loss', loss, epoch)
             eval_wtr.add_scalar('dice', metric, epoch)
 
@@ -304,9 +344,13 @@ if __name__ == '__main__':
                 print("saved weights to {}\n".format(f))
                 prev_metric = metric
 
-        # 预热期过后，按照策略更新学习率
-        if not TINY_TRAIN and epoch >= WARM_UP_EPOCH:
-            scheduler.step()
+        # # 预热期过后，按照策略更新学习率
+        # if epoch >= WARM_UP_EPOCH:
+        #     scheduler.step()
+
+    f = os.path.join(CHECKPOINT, 'last.pt')
+    torch.save(model, f)
+    print("saved weights to {}\n".format(f))
 
     train_wtr.close()
     eval_wtr.close()
