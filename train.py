@@ -1,5 +1,4 @@
 import os
-import sys
 import time
 
 import torch
@@ -14,7 +13,7 @@ from torchvision.transforms import Compose
 from conf import *
 from utils import *
 from models import *
-from Data.misc import train_eval_split, draw_tiny_samples
+from Data.misc import train_eval_split, draw_tiny_samples, load_balanced_data
 # from data_process import calc_train_eval_pixel, calc_scale_pixel
 
 from Data.load_data import CancerDataset
@@ -35,66 +34,61 @@ def load_data():
     train_img_paths, eval_img_paths, train_label_paths, eval_label_paths = train_eval_split()
     # calc_train_eval_pixel(train_img_paths, eval_img_paths)
 
-    # 构造训练集
-    train_ds = CancerDataset(
-        img_paths=train_img_paths,
-        label_paths=train_label_paths,
-        transform=Compose([
-            # PILResize(INPUT_SIZE, mode=Image.BILINEAR),
-            # 转换为0-1张量
-            ConvertToTensor(),
-            # 尺寸缩放，短边（高）缩放到512，同时保持基于训练集图像统计的宽高比均值
-            # Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bicubic', align_corners=True),
-            Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bilinear', align_corners=True),
-            # 归一化
-            Norm(mean=TRAIN_SCALE_MEAN, std=TRAIN_SCALE_STD)
-        ])
-    )
+    # # 构造训练集
+    # train_ds = CancerDataset(
+    #     img_paths=train_img_paths,
+    #     label_paths=train_label_paths,
+    #     transform=Compose([
+    #         # PILResize(INPUT_SIZE, mode=Image.BILINEAR),
+    #         # 转换为0-1张量
+    #         ConvertToTensor(),
+    #         # 尺寸缩放，短边（高）缩放到512，同时保持基于训练集图像统计的宽高比均值
+    #         # Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bicubic', align_corners=True),
+    #         Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bilinear', align_corners=True),
+    #         # 归一化
+    #         Norm(mean=TRAIN_SCALE_MEAN, std=TRAIN_SCALE_STD)
+    #     ])
+    # )
     # # 统计缩放后训练集图像的均值和标准差
     # calc_scale_pixel(train_ds, INPUT_SIZE, dev)
 
-    # 构造验证集
-    eval_ds = CancerDataset(
-        img_paths=eval_img_paths,
-        label_paths=eval_label_paths,
-        transform=Compose([
-            # PILResize(INPUT_SIZE, mode=Image.BILINEAR),
-            # 转换为0-1张量
-            ConvertToTensor(),
-            # 尺寸缩放，短边（高）缩放到512，同时保持基于训练集图像统计的宽高比均值
-            # Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bicubic', align_corners=True),
-            Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bilinear', align_corners=True),
-            # 归一化
-            Norm(mean=TRAIN_SCALE_MEAN, std=TRAIN_SCALE_STD)
-        ])
-    )
+    # # 构造验证集
+    # eval_ds = CancerDataset(
+    #     img_paths=eval_img_paths,
+    #     label_paths=eval_label_paths,
+    #     transform=Compose([
+    #         # PILResize(INPUT_SIZE, mode=Image.BILINEAR),
+    #         # 转换为0-1张量
+    #         ConvertToTensor(),
+    #         # 尺寸缩放，短边（高）缩放到512，同时保持基于训练集图像统计的宽高比均值
+    #         # Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bicubic', align_corners=True),
+    #         Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bilinear', align_corners=True),
+    #         # 归一化
+    #         Norm(mean=TRAIN_SCALE_MEAN, std=TRAIN_SCALE_STD)
+    #     ])
+    # )
     # # 统计缩放后验证集图像的均值和标准差
     # calc_scale_pixel(eval_ds, INPUT_SIZE, dev)
 
-    # ds = CancerDataset(os.path.join(DATA_DIR, 'Train'), transform=Compose([
-    #     # 缩放到基于数据集统计的尺寸均值
-    #     # PILResize(INPUT_SIZE),
-    #     # 转换为0-1张量并归一化
-    #     # 均值和标准差都是基于数据集统计的值
-    #     # ToNormTensor(mean=0, std=1)
-    #     ConvertToTensor(),
-    #     # 尺寸缩放，短边（高）缩放到512，同时保持基于训练集图像统计的宽高比均值
-    #     Scale(size=INPUT_SIZE, mode='bilinear', align_corners=True)
-    # ]))
-    # # 按比例划分训练集和验证集
-    # val_len = int(len(ds) * SPLIT_RATIO)
-    # train_len = len(ds) - val_len
-    # train_ds, val_ds = random_split(ds, (train_len, val_len))
-    # print("num of images in training set:{}, num of images in validation set:{}".format(
-    #     len(train_ds), len(val_ds)))
-    #
-
-    train_dl = DataLoader(train_ds, BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True, drop_last=True)
-    eval_dl = DataLoader(eval_ds, BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
+    # train_dl = DataLoader(train_ds, BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True, drop_last=True)
+    # eval_dl = DataLoader(eval_ds, BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
+    train_ds, eval_ds = load_balanced_data(train_img_paths, eval_img_paths, train_label_paths, eval_label_paths)
+    train_dl = DataLoader(train_ds, BATCH_SIZE, num_workers=2, pin_memory=True, drop_last=True)
+    eval_dl = DataLoader(eval_ds, BATCH_SIZE, num_workers=2, pin_memory=True)
     print("batch size={}, {} batches in training set, {} batches in validation set\n".format(
         BATCH_SIZE, len(train_dl), len(eval_dl)))
 
-    # TODO: 验证每个batch都有阴阳样本
+    # # 验证每个batch都有阴阳样本(this may take few minutes)
+    # for batch_data in train_dl:
+    #     batch_labels = batch_data.get('label')
+    #     batch_label_names = batch_data.get('label_name')
+    #     assert torch.sum(batch_labels > 0) > 0, "there is no positive sample in {}!".format(
+    #         batch_label_names.numpy().tolist())
+    # for batch_data in eval_dl:
+    #     batch_labels = batch_data.get('label')
+    #     batch_label_names = batch_data.get('label_name')
+    #     assert torch.sum(batch_labels > 0) > 0, "there is no positive sample in {}!".format(
+    #         batch_label_names.numpy().tolist())
 
     return train_dl, eval_dl
 
@@ -137,7 +131,7 @@ def set_optim(net):
         params['lr'] = BASE_LR
 
     # 学习率策略
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, 10, eta_min=MIN_LR)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, 5, eta_min=MIN_LR)
     # 动态调整的余弦退火，初始周期为4，即４个周期后restart为初始学习率，之后呈平方增长
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, 4, T_mult=2, eta_min=MIN_LR)
     return optim, scheduler
@@ -169,6 +163,7 @@ def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev, wtr):
         outputs = net(batch_images)
         # 计算loss
         loss = loss_func(outputs, batch_labels)
+
         # 反向传播梯度
         loss.backward()
         # 优化器更新参数
@@ -204,6 +199,8 @@ def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev, wtr):
     print("Epoch[{}]: loss={}, time used:{:.3f}s".format(epoch + 1, total_loss, end_time - start_time))
     print('-' * 60, '\n')
 
+    torch.cuda.empty_cache()
+
     return total_loss
 
 
@@ -211,72 +208,83 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
     # 平均loss
     total_loss = 0.
     # 平均dice
-    total_metric = 0.
+    total_dice = 0.
     # 阳性样本数量
     total_pos_num = 0
     # 记录评估用时
     start_time = time.time()
 
-    progress = tqdm(eval_dataloader)
-    progress.set_description_str("Eval Epoch[{}]".format(epoch + 1))
-    for it, batch_data in enumerate(progress):
-        batch_labels = batch_data.get('label').to(dev).int()
-        # 若该批次没有阳性样本，则略过
-        if torch.sum(batch_labels > 0) == 0:
-            continue
+    # 加上这句可减少GPU占用
+    with torch.no_grad():
+        # 使用dice评估
+        metric_func = Dice()
+        # 进度条
+        progress = tqdm(eval_dataloader)
+        progress.set_description_str("Eval Epoch[{}]".format(epoch + 1))
 
-        batch_image_names = batch_data.get('image_name')
-        batch_images = batch_data.get('image').to(dev).float()
+        for it, batch_data in enumerate(progress):
+            batch_labels = batch_data.get('label').int()
+            # 若该批次没有阳性样本，则略过
+            if torch.sum(batch_labels > 0) == 0:
+                continue
 
-        # 该批次的阳性样本数量
-        batch_pos_num = 0
-        # 该批次阳性样本的平均loss和平均dice
-        batch_loss = batch_metric = 0.
-        for image, label, name in zip(batch_images, batch_labels, batch_image_names):
-            # 仅对阳性样本评估
-            if torch.sum(label == 1) > 0:
-                # (C,H,W)->(1,C,H,W)
-                image = image.unsqueeze(0)
-                # (H,W)->(1,H,W)
-                label = label.unsqueeze(0)
-                output = net(image)
-                loss, cost = criteria_func(output, label, eval=True)
-                batch_pos_num += 1
-                batch_loss += loss
-                batch_metric += cost
-
-                step = epoch * len(eval_dataloader) + it
-                if step % VIS_CYCLE == 0:
-                    # 概率图, (1,H,W)->(1,1,H,W)
-                    pred = torch.sigmoid(output).unsqueeze(0)
-                    # 二值图
-                    binary_pred = torch.zeros_like(pred)
-                    binary_pred[pred >= THRESH] = 1
-                    # (1,H,W)->(1,1,H,W)
-                    mask = label.unsqueeze(0).float()
-
-                    concat = torch.cat([pred, mask, binary_pred])
-                    image_grids = make_grid(concat, nrow=3, padding=3, pad_value=.5)
-                    wtr.add_image('step{}-{}'.format(step, name), image_grids, step)
-
-        if it % LOG_CYCLE == 0:
             batch_image_names = batch_data.get('image_name')
-            progress.set_postfix_str("Iter[{}]: loss={:.3f}, cost={:.3f}, images:{}".format(
-                it + 1, batch_loss / batch_pos_num, batch_metric / batch_pos_num, batch_image_names))
+            batch_images = batch_data.get('image').float()
 
-        total_loss += batch_loss
-        total_metric += batch_metric
-        total_pos_num += batch_pos_num
+            # 该批次的阳性样本数量
+            batch_pos_num = 0
+            # 该批次阳性样本的平均loss和平均dice
+            batch_loss = batch_dice = 0.
+
+            for image, label, name in zip(batch_images, batch_labels, batch_image_names):
+                # 仅对阳性样本评估
+                if torch.sum(label == 1) > 0:
+                    # (C,H,W)->(1,C,H,W)
+                    image = image.unsqueeze(0).to(dev)
+                    # (H,W)->(1,H,W)
+                    label = label.unsqueeze(0).to(dev)
+                    # (1,1,H,W)
+                    output = net(image)
+                    loss = criteria_func(output, label).detach().item()
+                    dice = metric_func.get_dice(output, label)
+                    batch_pos_num += 1
+                    batch_loss += loss
+                    batch_dice += dice
+
+                    step = epoch * len(eval_dataloader) + it
+                    if step % VIS_CYCLE == 0:
+                        # 概率图, (1,1,H,W)
+                        pred = torch.sigmoid(output)
+                        # 二值图
+                        binary_pred = torch.zeros_like(pred)
+                        binary_pred[pred >= THRESH] = 1
+                        # (1,H,W)->(1,1,H,W)
+                        mask = label.unsqueeze(0).float()
+
+                        concat = torch.cat([pred, mask, binary_pred])
+                        image_grids = make_grid(concat, nrow=3, padding=3, pad_value=.5)
+                        wtr.add_image('step{}-{}'.format(step, name), image_grids, step)
+
+            if it % LOG_CYCLE == 0:
+                batch_image_names = batch_data.get('image_name')
+                progress.set_postfix_str("Iter[{}]: loss={:.3f}, dice={:.6f}, images:{}".format(
+                    it + 1, batch_loss / batch_pos_num, batch_dice / batch_pos_num, batch_image_names))
+
+            total_loss += batch_loss
+            total_dice += batch_dice
+            total_pos_num += batch_pos_num
 
     end_time = time.time()
     # 所有阳性样本的平均loss和dice
     total_loss /= total_pos_num
-    total_metric /= total_pos_num
-    print("Eval Epoch[{}]: loss={:.3f}, metric={:.3f}, time used:{:.3f}s".format(
-        epoch + 1, total_loss, total_metric, end_time - start_time))
+    total_dice /= total_pos_num
+    print("Eval Epoch[{}]: loss={:.3f}, dice={:.3f}, time used:{:.3f}s".format(
+        epoch + 1, total_loss, total_dice, end_time - start_time))
     print('-' * 60, '\n')
 
-    return total_loss, total_metric
+    torch.cuda.empty_cache()
+
+    return total_loss, total_dice
 
 
 if __name__ == '__main__':
@@ -300,23 +308,25 @@ if __name__ == '__main__':
     # 定制优化器和学习率策略
     optimizer, scheduler = set_optim(model)
     # 损失函数
-    criterion = Dice()
+    # criterion = Dice()
+    # criterion = BCEDice(pos_weight=torch.full(NUM_CLASSES, 1000 / 732))
+    criterion = BCE(pos_weight=torch.full((NUM_CLASSES,), 2., device=device))
+
     # 可视化
     train_wtr = SummaryWriter(os.path.join(VISUAL_DIR, 'Train'))
     eval_wtr = SummaryWriter(os.path.join(VISUAL_DIR, 'Eval'))
 
     print("Start Training!")
-    prev_metric = sys.maxsize
+    prev_dice = 0.
     for epoch in range(EPOCHS):
         # 设置模型为训练模式
         model.train()
 
-        # 先使用小的学习率进行热身
+        # Gradual warm-up，初始阶段使用线性增长的小的学习率
         if epoch < WARM_UP_EPOCH:
-            set_lr(optimizer, WARM_UP_LR)
-        # 预热一定周期后恢复初始学习率
-        elif epoch == WARM_UP_EPOCH:
-            set_lr(optimizer, BASE_LR)
+            print("Warm-Up Stage:[{}/{}]".format(epoch + 1, WARM_UP_EPOCH))
+            set_lr(optimizer, BASE_LR * ((epoch + 1) / WARM_UP_EPOCH))
+
         lr = optimizer.param_groups[0]['lr']
         # 可视化学习率曲线
         train_wtr.add_scalar('lr', lr, epoch)
@@ -332,21 +342,21 @@ if __name__ == '__main__':
             print("Start Evaluation of Epoch[{}]!".format(epoch + 1))
             # 设置模型为评估模式
             model.eval()
-            loss, metric = eval(epoch, eval_dl, model, criterion, device, eval_wtr)
+            loss, dice = eval(epoch, eval_dl, model, criterion, device, eval_wtr)
             eval_wtr.add_scalar('loss', loss, epoch)
-            eval_wtr.add_scalar('dice', metric, epoch)
+            eval_wtr.add_scalar('dice', dice, epoch)
 
             # 若当前评估性能优于之前，则保存权重
-            if metric < prev_metric:
-                print("Gain best dice:{:.3f}".format(metric))
+            if dice > prev_dice:
+                print("Gain best dice:{:.3f}".format(dice))
                 f = os.path.join(CHECKPOINT, 'best.pt')
                 torch.save(model, f)
                 print("saved weights to {}\n".format(f))
-                prev_metric = metric
+                prev_dice = dice
 
-        # # 预热期过后，按照策略更新学习率
-        # if epoch >= WARM_UP_EPOCH:
-        #     scheduler.step()
+        # 预热期过后，按照策略更新学习率
+        if epoch >= WARM_UP_EPOCH:
+            scheduler.step()
 
     f = os.path.join(CHECKPOINT, 'last.pt')
     torch.save(model, f)
