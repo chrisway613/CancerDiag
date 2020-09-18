@@ -1,17 +1,22 @@
 __all__ = ('Dice', 'BCE', 'BCEDice',)
 
 import torch
-import torch.nn.functional as F
 
 
 class Dice:
-    """Dice loss & metric."""
+    """Dice loss(with OHEM, optional) & metric."""
 
-    def __init__(self, p=2, smooth=1., reduction='mean'):
+    def __init__(self, p=2, smooth=1., reduction='mean', ohem=False, top_k_ratio=1.):
+        if ohem:
+            assert 0 < top_k_ratio < 1, "'top_k_ratio' must in range (0, 1) when in OHEM mode"
+        self.ohem = ohem
+        self.top_k_ratio = top_k_ratio
+
         self.p = p
         self.smooth = smooth
         self.reduction = reduction
-        print("Train/Eval with Dice Loss/Metric")
+
+        print("#Train/Eval with Dice Loss/Metric\n")
 
     def __call__(self, pred, label):
         """
@@ -22,35 +27,48 @@ class Dice:
                 avg multi label dice loss overage all pixels.
         """
 
-        prob = torch.sigmoid(pred.squeeze(1))
-
         N = label.shape[0]
-        # (N,H,W) -> (N,H*W)
-        m1 = torch.reshape(prob, (N, -1))
-        m2 = torch.reshape(label, (N, -1))
+        # (N,H*W)
+        label = label.view(N, -1)
+        pred = pred.view(N, -1)
 
-        # (N,)
+        # 只对阳性样本计算dice loss
+        pos_indices = torch.where(label.sum(dim=1) > 0)[0]
+        # (num_pos,)
+        m1 = label[pos_indices]
+        m2 = torch.sigmoid(pred[pos_indices])
+
+        # # (N,1,H,W)->(N,H,W)
+        # prob = torch.sigmoid(pred.squeeze(1))
+        # # (N,H,W) -> (N,H*W)
+        # m1 = torch.reshape(prob, (N, -1))
+        # m2 = torch.reshape(label, (N, -1))
+
+        # (num_pos,)
         intersection = (m1 * m2).sum(dim=1)
         # 使用 p > 1 可使loss变大，加速收敛
         union = m1.pow(self.p).sum(dim=1) + m2.pow(self.p).sum(dim=1)
         coeff = (2. * intersection + self.smooth) / (union + self.smooth)
-        # loss over batch data
+        # (num_pos,) loss over positive samples
         loss = 1. - coeff
+        # assert loss.shape[0] == N and loss.ndim == 1
+        assert loss.shape == pos_indices.shape and loss.ndim == 1
+
+        if self.ohem:
+            # OHEM模式下，只取loss最大的topk样本进行学习
+            keep_num = max(1, int(self.top_k_ratio * N))
+            loss, indices = loss.topk(keep_num)
+        else:
+            indices = torch.arange(N)
 
         if self.reduction == 'mean':
-            loss = torch.mean(loss)
+            return torch.mean(loss), indices
         elif self.reduction == 'sum':
-            loss = torch.sum(loss)
+            return torch.sum(loss), indices
+        elif self.reduction == 'none':
+            return loss, indices
         else:
             raise NotImplementedError("Not implemented with reduction '{}'".format(self.reduction))
-
-        return loss
-        # # 评估模式则同时返回dice评估系数
-        # if eval:
-        #     cost = self._dice(pred, label)
-        #     return loss.detach().item(), cost.detach().item()
-        # else:
-        #     return loss
 
     def get_dice(self, pred, label):
         # (N,1,H,W)->(N,H,W)
@@ -78,32 +96,62 @@ class Dice:
 
 
 class BCE(torch.nn.BCEWithLogitsLoss):
-    """self-defined BCEWithLogitsLoss, details see torch.nn.BCEWithLogitsLoss."""
+    """torch.nn.BCEWithLogitsLoss with OHEM."""
 
-    def __init__(self, weight=None, reduction='mean', pos_weight=None):
-        super(BCE, self).__init__(weight=weight, reduction=reduction, pos_weight=pos_weight)
+    def __init__(self, weight=None, reduction='mean', pos_weight=None, ohem=False, top_k_ratio=1.):
+        if ohem:
+            assert 0 < top_k_ratio < 1, "'top_k_ratio' must in range (0, 1) when in OHEM mode"
+            super(BCE, self).__init__(weight=weight, reduction='none', pos_weight=pos_weight)
+        else:
+            super(BCE, self).__init__(weight=weight, reduction=reduction, pos_weight=pos_weight)
+
+        self.ohem = ohem
+        self.top_k_ratio = top_k_ratio
         print("#Train with BCEWithLogitsLoss\n")
 
     def forward(self, pred, target):
         # pred - (N,1,H,W); target - (N,H,W)
+        N = target.shape[0]
+        # (N,1,H,W)->(N,H*W); (N,H,W)->(N,H*W)
         # BCE要求预测和标签是float类型
-        return super(BCE, self).forward(pred.squeeze(1), target.float())
+        loss = super(BCE, self).forward(pred.squeeze(1).view(N, -1), target.view(N, -1).float())
+
+        if self.ohem:
+            assert loss.shape[0] == N and loss.ndim == 2
+            # (N,H*W)->(N,)
+            loss = loss.sum(dim=1)
+            # OHEM模式下，只取loss最大的topk样本进行学习
+            keep_num = max(1, int(self.top_k_ratio * N))
+            top_k_loss, indices = loss.topk(keep_num)
+
+            if self.reduction == 'mean':
+                return top_k_loss.mean(), indices
+            elif self.reduction == 'sum':
+                return top_k_loss.sum(), indices
+            elif self.reduction == 'none':
+                return top_k_loss, indices
+            else:
+                raise NotImplementedError("Not implemented with reduction '{}'".format(self.reduction))
+        else:
+            indices = torch.arange(N)
+            return loss, indices
 
 
 class BCEDice:
-    """Combine BCEWithLogitsLoss with DiceLoss.
+    """Combine BCEWithLogitsLoss with DiceLoss, plus OHEM.
        pos_weight是正样本的bce loss权重，通常设置为正负样本比的倒数。"""
 
-    def __init__(self, pos_weight=None, p=2, smooth=1., reduction='mean'):
-        self.bce = BCE(pos_weight=pos_weight)  # torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        self.dice = Dice(p, smooth, reduction)
+    def __init__(self, pos_weight=None, p=2, smooth=1., reduction='mean', ohem=False, top_k_ratio=1.):
+        self.bce = BCE(reduction=reduction, pos_weight=pos_weight, ohem=ohem, top_k_ratio=top_k_ratio)
+        self.dice = Dice(p, smooth, reduction, ohem, top_k_ratio)
         print("#Train with BCEWithLogitsLoss & DiceLoss\n")
 
     def __call__(self, pred, target):
         # pred - (N,1,H,W); target - (N,H,W)
-        # BCELoss要求预测和标签的shape一致
-        bce_loss = self.bce(pred, target)  # self.bce(pred.squeeze(1), target.float())
-        dice_loss = self.dice(pred, target)
-        loss = 2. * bce_loss + dice_loss
+        bce_loss, bce_indices = self.bce(pred, target)
+        dice_loss, dice_indices = self.dice(pred, target)
+        loss = bce_loss + dice_loss
+        # print("bce indices:", bce_indices)
+        # print("dice indices:", dice_indices)
 
-        return loss, bce_loss.detach().item(), dice_loss.detach().item()
+        return loss, bce_loss.detach(), dice_loss.detach(), bce_indices, dice_indices

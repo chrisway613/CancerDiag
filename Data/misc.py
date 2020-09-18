@@ -32,16 +32,29 @@ def train_eval_split():
 
     assert len(image_paths) == len(label_paths)
 
+    # 随机数种子
+    if os.path.exists(RANDOM_SEED):
+        with open(RANDOM_SEED, 'r') as f:
+            random_seed = int(f.read().strip())
+            print("Using random seed:{}".format(random_seed))
+    else:
+        random_seed = -1
+        print("Initialize random seed={}".format(random_seed))
+
     train_rate = eval_rate = 0.
     # 当划分后训练集阳性样本数量不足阴性样本的七成或者验证集中没有阳性样本时重新划分
     # 因为原训练集中阴性样本数量:阳性样本数量就是约为10:7
     while train_rate < .7 or eval_rate < .5:
+        if not os.path.exists(RANDOM_SEED):
+            random_seed += 1
+
         # 从训练集中按比例划分验证集
         train_img_paths, eval_img_paths, \
             train_label_paths, eval_label_paths = train_test_split(image_paths, label_paths,
-                                                                   test_size=SPLIT_RATIO, shuffle=True)
-        print("num of images in training set:{}, num of images in validation set:{}".format(
-            len(train_img_paths), len(eval_img_paths)))
+                                                                   test_size=SPLIT_RATIO, shuffle=True,
+                                                                   random_state=random_seed)
+        # print("num of images in training set:{}, num of images in validation set:{}".format(
+        #     len(train_img_paths), len(eval_img_paths)))
 
         # 划分后训练集中的阳性样本
         train_img_pos_paths = [path for path in train_img_paths
@@ -73,6 +86,11 @@ def train_eval_split():
         # print("[Eval] positive samples num:{}, negative samples num:{}, rate(pos/neg)={:.3f}".format(
         #     eval_pos_num, eval_neg_num, eval_rate))
 
+    # 将随机数种子写入文件，保证下次划分数据集得到相同的结果
+    with open(RANDOM_SEED, 'w') as f:
+        f.write(str(random_seed))
+        print("overwritten random seed={}\n".format(random_seed))
+
     print("[Train] positive samples num:{}, negative samples num:{}, rate(pos/neg)={:.3f}".format(
             train_pos_num, train_neg_num, train_rate))
     print("[Eval] positive samples num:{}, negative samples num:{}, rate(pos/neg)={:.3f}".format(
@@ -81,7 +99,7 @@ def train_eval_split():
     # 令验证集只包含阳性样本
     eval_img_paths = eval_img_pos_paths
     eval_label_paths = eval_label_pos_paths
-    print("#[Eval] drop negative samples")
+    print("#[Eval] drop negative samples\n")
     # # 只训练阳性样本
     # train_img_paths = train_img_pos_paths
     # train_label_paths = train_label_pos_paths
@@ -241,7 +259,7 @@ def load_balanced_data(train_img_paths, eval_img_paths, train_label_paths, eval_
             ConvertToTensor(),
             Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bilinear', align_corners=True),
             # Scale(size=(TINY_SIZE[1], TINY_SIZE[0]), mode='bilinear', align_corners=True),
-            Norm(mean=TRAIN_SCALE_MEAN, std=TRAIN_SCALE_STD)
+            Norm(mean=EVAL_SCALE_MEAN, std=EVAL_SCALE_STD)
         ]),
         # 不排序，按照采样好的顺序，阴阳样本依次相邻
         sort=False

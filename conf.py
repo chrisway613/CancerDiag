@@ -9,6 +9,8 @@ DATA_DIR = 'Data'
 VISUAL_DIR = 'Visual'
 # 验证集划分比例
 SPLIT_RATIO = .2
+# 记录随机数种子
+RANDOM_SEED = 'seed.txt'
 
 # 图像输入网络时缩放的尺寸 --（宽，高）
 INPUT_SIZE = (744, 512)
@@ -17,23 +19,25 @@ MID_SIZE = (652, 448)
 # 小尺寸训练
 TINY_SIZE = (372, 256)
 
-# 训练集原图像像素均值与标准差(RGB)
+# 原始训练集（划分前）原图像像素均值与标准差(RGB)
 TRAIN_MEAN = [208.644, 184.249, 206.240]
 TRAIN_STD = [54.267, 77.503, 51.150]
 # 训练集缩放后图像像素均值与标准差(RGB)
-TRAIN_SCALE_MEAN = [.775, .619, .753]
-TRAIN_SCALE_STD = [.218, .300, .200]
+TRAIN_SCALE_MEAN = [.773, .619, .751]
+TRAIN_SCALE_STD = [.220, .304, .202]
+# 验证集缩放后图像像素均值与标准差(RGB)
+EVAL_SCALE_MEAN = [.764, .623, .749]
+EVAL_SCALE_STD = [.233, .326, .214]
 
 # 测试机图像像素均值与标准差(RGB)
 TEST_MEAN = [209.849, 188.015, 208.279]
 TEST_STD = [53.722, 76.320, 50.763]
 
-EPOCHS = 1000
-WARM_UP_EPOCH = 3
+EPOCHS = 300
+WARM_UP_EPOCH = 5
 BATCH_SIZE = 8
-BASE_LR = 3e-2
-MIN_LR = 5e-4
-WARM_UP_LR = 1e-4
+BASE_LR = 5e-3
+MIN_LR = 1e-4
 NUM_CLASSES = 1
 # 预测概率阀值
 THRESH = .5
@@ -46,7 +50,7 @@ SYN_BN = False
 
 # 打印log的迭代周期
 LOG_CYCLE = 3
-# 可视化预测概率map的迭代周期
+# 每10次迭代可视化预测概率图
 VIS_CYCLE = 10
 # 训练过程中进行评估验证的周期
 TIME_TO_EVAL = 10

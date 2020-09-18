@@ -1,5 +1,6 @@
 import os
 import time
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -14,7 +15,7 @@ from conf import *
 from utils import *
 from models import *
 from Data.misc import train_eval_split, draw_tiny_samples, load_balanced_data
-# from data_process import calc_train_eval_pixel, calc_scale_pixel
+from data_process import calc_train_eval_pixel, calc_scale_pixel
 
 from Data.load_data import CancerDataset
 from Data.transform import ConvertToTensor, Norm, Scale
@@ -25,10 +26,10 @@ os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(device_id) for device_id in D
 def load_data():
     """Build Dataloader of training & validation set."""
 
-    # if GPU:
-    #     dev = torch.device('cuda:{}'.format(DEVICE_ID[0]))
-    # else:
-    #     dev = torch.device('cpu')
+    if GPU:
+        dev = torch.device('cuda:{}'.format(DEVICE_ID[0]))
+    else:
+        dev = torch.device('cpu')
 
     # 从总体训练集中划分一部分作为验证集
     train_img_paths, eval_img_paths, train_label_paths, eval_label_paths = train_eval_split()
@@ -73,6 +74,8 @@ def load_data():
     # train_dl = DataLoader(train_ds, BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True, drop_last=True)
     # eval_dl = DataLoader(eval_ds, BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
     train_ds, eval_ds = load_balanced_data(train_img_paths, eval_img_paths, train_label_paths, eval_label_paths)
+    # calc_scale_pixel(train_ds, INPUT_SIZE, dev)
+    # calc_scale_pixel(eval_ds, INPUT_SIZE, dev)
     train_dl = DataLoader(train_ds, BATCH_SIZE, num_workers=2, pin_memory=True, drop_last=True)
     eval_dl = DataLoader(eval_ds, BATCH_SIZE, num_workers=2, pin_memory=True)
     print("batch size={}, {} batches in training set, {} batches in validation set\n".format(
@@ -145,6 +148,8 @@ def set_lr(optim, lr):
 def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev, wtr):
     # 一个训练周期的平均loss
     total_loss = 0.
+    total_bce_loss = 0.
+    total_dice_loss = 0.
     # 记录训练用时
     start_time = time.time()
 
@@ -162,18 +167,29 @@ def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev, wtr):
         # 前向反馈
         outputs = net(batch_images)
         # 计算loss
-        loss = loss_func(outputs, batch_labels)
+        # loss = loss_func(outputs, batch_labels)
+        loss, bce_loss, dice_loss, bce_indices, dice_indices = loss_func(outputs, batch_labels)
 
         # 反向传播梯度
         loss.backward()
         # 优化器更新参数
         optim.step()
 
+        total_bce_loss += bce_loss.item()
+        total_dice_loss += dice_loss.item()
         total_loss += loss.detach().item()
 
         if it % LOG_CYCLE == 0:
             batch_image_names = batch_data.get('image_name')
-            progress.set_postfix_str("Iter[{}]: loss={:.3f}, images:{}".format(it + 1, loss.item(), batch_image_names))
+            # batch_image_names_arr = np.asarray(batch_image_names)
+            # bce_top_k_images = batch_image_names_arr[bce_indices.numpy()]
+            # dice_top_k_images = batch_image_names_arr[dice_indices.numpy()]
+            # progress.set_postfix_str("Iter[{}]: loss={:.3f}, images:{}".format(it + 1, loss.item(), batch_image_names))
+            progress.set_postfix_str("Iter[{}]: bce loss={:.5f}, dice loss={:.5f}, total loss={:.5f}".format(
+                it + 1, bce_loss, dice_loss, loss))
+            print("\nTrain Epoch[{}] Iter[{}] images: {}\n".format(epoch + 1, it + 1, batch_image_names))
+            # print("Top k images of BCE Loss: {}".format(bce_top_k_images))
+            # print("Top k images of Dice Loss: {}\n".format(dice_top_k_images))
 
         # 当前迭代次数＝周期x批次总数+当前批次
         step = epoch * len(train_dataloader) + it
@@ -192,21 +208,28 @@ def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev, wtr):
                 concat = torch.cat([pred, label.unsqueeze(0).unsqueeze(0).float(), binary_pred])
                 # padding是代表图像之间的间隔距离，.5代表使用灰色作为分隔颜色
                 image_grids = make_grid(concat, nrow=3, padding=3, pad_value=.5)
-                wtr.add_image('step{}-{}'.format(step, str(name)), image_grids, step)
+                wtr.add_image('Train-Step{}-{}'.format(step, str(name)), image_grids, step)
 
     end_time = time.time()
     total_loss /= len(train_dataloader)
-    print("Epoch[{}]: loss={}, time used:{:.3f}s".format(epoch + 1, total_loss, end_time - start_time))
+    total_bce_loss /= len(train_dataloader)
+    total_dice_loss /= len(train_dataloader)
+    # print("Epoch[{}]: loss={}, time used:{:.3f}s".format(epoch + 1, total_loss, end_time - start_time))
+    print("Epoch[{}]: bce loss={:.5f}, dice loss={:.5f}, loss={}, time used:{:.3f}s".format(
+        epoch + 1, total_bce_loss, total_dice_loss, total_loss, end_time - start_time))
     print('-' * 60, '\n')
 
+    # 释放缓存的GPU资源
     torch.cuda.empty_cache()
 
-    return total_loss
+    return total_loss, total_bce_loss, total_dice_loss
 
 
 def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
     # 平均loss
     total_loss = 0.
+    total_bce_loss = 0.
+    total_dice_loss = 0.
     # 平均dice
     total_dice = 0.
     # 阳性样本数量
@@ -218,10 +241,10 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
     with torch.no_grad():
         # 使用dice评估
         metric_func = Dice()
+
         # 进度条
         progress = tqdm(eval_dataloader)
         progress.set_description_str("Eval Epoch[{}]".format(epoch + 1))
-
         for it, batch_data in enumerate(progress):
             batch_labels = batch_data.get('label').int()
             # 若该批次没有阳性样本，则略过
@@ -235,6 +258,7 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
             batch_pos_num = 0
             # 该批次阳性样本的平均loss和平均dice
             batch_loss = batch_dice = 0.
+            batch_dice_loss = batch_bce_loss = 0.
 
             for image, label, name in zip(batch_images, batch_labels, batch_image_names):
                 # 仅对阳性样本评估
@@ -245,10 +269,13 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
                     label = label.unsqueeze(0).to(dev)
                     # (1,1,H,W)
                     output = net(image)
-                    loss = criteria_func(output, label).detach().item()
+                    # loss = criteria_func(output, label).detach().item()
+                    loss, bce_loss, dice_loss, _, _ = criteria_func(output, label)
                     dice = metric_func.get_dice(output, label)
                     batch_pos_num += 1
-                    batch_loss += loss
+                    batch_bce_loss += bce_loss.item()
+                    batch_dice_loss += dice_loss.item()
+                    batch_loss += loss.detach().item()
                     batch_dice += dice
 
                     step = epoch * len(eval_dataloader) + it
@@ -263,28 +290,41 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
 
                         concat = torch.cat([pred, mask, binary_pred])
                         image_grids = make_grid(concat, nrow=3, padding=3, pad_value=.5)
-                        wtr.add_image('step{}-{}'.format(step, name), image_grids, step)
+                        wtr.add_image('Eval-Step{}-{}'.format(step, name), image_grids, step)
 
             if it % LOG_CYCLE == 0:
                 batch_image_names = batch_data.get('image_name')
-                progress.set_postfix_str("Iter[{}]: loss={:.3f}, dice={:.6f}, images:{}".format(
-                    it + 1, batch_loss / batch_pos_num, batch_dice / batch_pos_num, batch_image_names))
+                # progress.set_postfix_str("Iter[{}]: loss={:.3f}, dice={:.6f}, images:{}".format(
+                #     it + 1, batch_loss / batch_pos_num, batch_dice / batch_pos_num, batch_image_names))
+                progress.set_postfix_str("Iter[{}]: bce loss={:.5f}, dice loss={:.5f}, loss={:.5f}, "
+                                         "dice={:.5f}".format(it + 1, batch_bce_loss / batch_pos_num,
+                                                              batch_dice_loss / batch_pos_num,
+                                                              batch_loss / batch_pos_num,
+                                                              batch_dice / batch_pos_num))
+                print("\nEval Epoch[{}] Iter[{}] images: {}\n".format(epoch + 1, it + 1, batch_image_names))
 
             total_loss += batch_loss
+            total_bce_loss += batch_bce_loss
+            total_dice_loss += batch_dice_loss
             total_dice += batch_dice
             total_pos_num += batch_pos_num
 
     end_time = time.time()
     # 所有阳性样本的平均loss和dice
     total_loss /= total_pos_num
+    total_bce_loss /= total_pos_num
+    total_dice_loss /= total_pos_num
     total_dice /= total_pos_num
-    print("Eval Epoch[{}]: loss={:.3f}, dice={:.3f}, time used:{:.3f}s".format(
-        epoch + 1, total_loss, total_dice, end_time - start_time))
+    # print("Eval Epoch[{}]: loss={:.3f}, dice={:.3f}, time used:{:.3f}s".format(
+    #     epoch + 1, total_loss, total_dice, end_time - start_time))
+    print("Eval Epoch[{}]: bce loss={:.5f}, dice loss={:.5f}, loss={}, dice={:.5f}, time used:{:.3f}s".format(
+        epoch + 1, total_bce_loss, total_dice_loss, total_loss, total_dice, end_time - start_time))
     print('-' * 60, '\n')
 
+    # 释放缓存的GPU资源
     torch.cuda.empty_cache()
 
-    return total_loss, total_dice
+    return total_loss, total_dice, total_bce_loss, total_dice_loss
 
 
 if __name__ == '__main__':
@@ -309,8 +349,10 @@ if __name__ == '__main__':
     optimizer, scheduler = set_optim(model)
     # 损失函数
     # criterion = Dice()
-    # criterion = BCEDice(pos_weight=torch.full(NUM_CLASSES, 1000 / 732))
-    criterion = BCE(pos_weight=torch.full((NUM_CLASSES,), 2., device=device))
+    # criterion = BCE(pos_weight=torch.full((NUM_CLASSES,), 3., device=device))
+    criterion = BCEDice()
+    # # OHEM, 使用前75%的困难样本进行学习
+    # criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 3., device=device), ohem=True, top_k_ratio=.75)
 
     # 可视化
     train_wtr = SummaryWriter(os.path.join(VISUAL_DIR, 'Train'))
@@ -333,22 +375,29 @@ if __name__ == '__main__':
         print("Epoch[{}] lr={}".format(epoch + 1, lr))
 
         # 训练一个周期得到平均损失
-        epoch_loss = train_one_epoch(epoch, train_dl, model, optimizer, criterion, device, train_wtr)
+        # epoch_loss = train_one_epoch(epoch, train_dl, model, optimizer, criterion, device, train_wtr)
+        epoch_loss, epoch_bce_loss, epoch_dice_loss = train_one_epoch(epoch, train_dl, model, optimizer, criterion,
+                                                                      device, train_wtr)
         # 可视化loss曲线
         train_wtr.add_scalar('loss', epoch_loss, epoch)
+        train_wtr.add_scalar('bce loss', epoch_bce_loss, epoch)
+        train_wtr.add_scalar('dice loss', epoch_dice_loss, epoch)
 
         # 训练一定周期后在在验证集上测试
         if eval_dl is not None and (epoch + 1) % TIME_TO_EVAL == 0:
             print("Start Evaluation of Epoch[{}]!".format(epoch + 1))
             # 设置模型为评估模式
             model.eval()
-            loss, dice = eval(epoch, eval_dl, model, criterion, device, eval_wtr)
+            # loss, dice = eval(epoch, eval_dl, model, criterion, device, eval_wtr)
+            loss, dice, bce_loss, dice_loss = eval(epoch, eval_dl, model, criterion, device, eval_wtr)
             eval_wtr.add_scalar('loss', loss, epoch)
             eval_wtr.add_scalar('dice', dice, epoch)
+            eval_wtr.add_scalar('bce loss', bce_loss, epoch)
+            eval_wtr.add_scalar('dice loss', dice_loss, epoch)
 
             # 若当前评估性能优于之前，则保存权重
             if dice > prev_dice:
-                print("Gain best dice:{:.3f}".format(dice))
+                print("Gain best dice:{:.5f}".format(dice))
                 f = os.path.join(CHECKPOINT, 'best.pt')
                 torch.save(model, f)
                 print("saved weights to {}\n".format(f))
