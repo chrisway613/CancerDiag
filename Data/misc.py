@@ -1,5 +1,6 @@
 import os
 import math
+import shelve
 import random
 
 from sklearn.model_selection import train_test_split
@@ -59,8 +60,8 @@ def train_eval_split():
         # 划分后训练集中的阳性样本
         train_img_pos_paths = [path for path in train_img_paths
                                if int(os.path.basename(path).split('.')[0]) > 1000]
-        # train_label_pos_paths = [path for path in train_label_paths
-        #                          if int(os.path.basename(path).split('_mask.')[0]) > 1000]
+        train_label_pos_paths = [path for path in train_label_paths
+                                 if int(os.path.basename(path).split('_mask.')[0]) > 1000]
         # 划分后训练集中阳性样本数量
         train_pos_num = len(train_img_pos_paths)
         # 划分后训练集中阴性样本数量
@@ -96,19 +97,30 @@ def train_eval_split():
     print("[Eval] positive samples num:{}, negative samples num:{}, rate(pos/neg)={:.3f}".format(
         eval_pos_num, eval_neg_num, eval_rate))
 
+    # 只训练阳性样本
+    train_img_paths = train_img_pos_paths
+    train_label_paths = train_label_pos_paths
+    print("#[Train] drop negative samples")
     # 令验证集只包含阳性样本
     eval_img_paths = eval_img_pos_paths
     eval_label_paths = eval_label_pos_paths
     print("#[Eval] drop negative samples\n")
-    # # 只训练阳性样本
-    # train_img_paths = train_img_pos_paths
-    # train_label_paths = train_label_pos_paths
 
     # 检查图像与标签是否一一对应
     for img_path, label_path in zip(train_img_paths, train_label_paths):
         assert os.path.basename(img_path).split('.')[0] == os.path.basename(label_path).split('_mask.')[0]
     for img_path, label_path in zip(eval_img_paths, eval_label_paths):
         assert os.path.basename(img_path).split('.')[0] == os.path.basename(label_path).split('_mask.')[0]
+
+    # 将划分后训练集、验证集以及格子的阴阳样本路径写入文件，之后可直接从文件读取
+    with shelve.open('paths/ds_paths.db') as db:
+        db['train_img_paths'] = train_img_paths
+        db['train_label_paths'] = train_label_paths
+        db['train_img_pos_paths'] = train_img_pos_paths
+        db['train_label_pos_paths'] = train_label_pos_paths
+        db['eval_img_paths'] = eval_img_paths
+        db['eval_label_paths'] = eval_label_paths
+    print("@Dataset paths already recorded in {}\n".format(DS_PATHS))
 
     return train_img_paths, eval_img_paths, train_label_paths, eval_label_paths
 
@@ -261,8 +273,8 @@ def load_balanced_data(train_img_paths, eval_img_paths, train_label_paths, eval_
             # Scale(size=(TINY_SIZE[1], TINY_SIZE[0]), mode='bilinear', align_corners=True),
             Norm(mean=EVAL_SCALE_MEAN, std=EVAL_SCALE_STD)
         ]),
-        # 不排序，按照采样好的顺序，阴阳样本依次相邻
-        sort=False
+        # # 不排序，按照采样好的顺序，阴阳样本依次相邻
+        # sort=False
     )
 
     assert train_ds[0].get('image').shape[1:] == (INPUT_SIZE[1], INPUT_SIZE[0])

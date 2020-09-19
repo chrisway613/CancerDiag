@@ -11,6 +11,8 @@ VISUAL_DIR = 'Visual'
 SPLIT_RATIO = .2
 # 记录随机数种子
 RANDOM_SEED = 'seed.txt'
+# 划分后训练集和验证集图像与标签的路径
+DS_PATHS = 'Data/paths/ds_path.db'
 
 # 图像输入网络时缩放的尺寸 --（宽，高）
 INPUT_SIZE = (744, 512)
@@ -25,11 +27,14 @@ TRAIN_STD = [54.267, 77.503, 51.150]
 # 训练集缩放后图像像素均值与标准差(RGB)
 TRAIN_SCALE_MEAN = [.773, .619, .751]
 TRAIN_SCALE_STD = [.220, .304, .202]
+# 训练集缩放后阳性样本像素均值与标准差(RGB)
+TRAIN_SCALE_POS_MEAN = [.767, .626, .751]
+TRAIN_SCALE_POS_STD = [.233, .326, .215]
 # 验证集缩放后图像像素均值与标准差(RGB)
 EVAL_SCALE_MEAN = [.764, .623, .749]
 EVAL_SCALE_STD = [.233, .326, .214]
 
-# 测试机图像像素均值与标准差(RGB)
+# 测试集图像像素均值与标准差(RGB)
 TEST_MEAN = [209.849, 188.015, 208.279]
 TEST_STD = [53.722, 76.320, 50.763]
 
