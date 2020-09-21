@@ -92,19 +92,43 @@ def train_eval_split():
         f.write(str(random_seed))
         print("overwritten random seed={}\n".format(random_seed))
 
+    print("#dataset split result:")
     print("[Train] positive samples num:{}, negative samples num:{}, rate(pos/neg)={:.3f}".format(
             train_pos_num, train_neg_num, train_rate))
-    print("[Eval] positive samples num:{}, negative samples num:{}, rate(pos/neg)={:.3f}".format(
+    print("[Eval] positive samples num:{}, negative samples num:{}, rate(pos/neg)={:.3f}\n".format(
         eval_pos_num, eval_neg_num, eval_rate))
 
+    print("#dataset sample result:")
     # # 只训练阳性样本
     # train_img_paths = train_img_pos_paths
     # train_label_paths = train_label_pos_paths
-    # print("#[Train] drop negative samples")
+    # print("[Train] drop negative samples")
+    # 原训练集中所有的阴性样本
+    neg_img_paths = [path for path in image_paths if int(os.path.basename(path).split('.')[0]) < 1000]
+    random.shuffle(neg_img_paths)
+    # 令训练集中，阳性样本和阴性样本比例为10:1
+    neg_img_counts = max(10, len(train_img_pos_paths) // 10)
+    # 随机采样阴性样本图像路径
+    train_img_neg_paths = random.sample(neg_img_paths, neg_img_counts)
+    # 生成对应的阴性样本标签路径
+    train_label_neg_paths = [
+        os.path.join(os.path.dirname(p).replace('Images', 'Labels'),
+                     os.path.basename(p).split('.')[0] + '_mask.jpg') for p in train_img_neg_paths
+    ]
+    # 检查路径的有效性
+    for path in train_label_neg_paths:
+        assert os.path.exists(path)
+
+    # 阳性:阴性=10:1组成训练集，加入小比例的阴性样本相当于噪声和扰动，提高泛化能力，避免过拟合
+    train_img_paths = train_img_pos_paths + train_img_neg_paths
+    train_label_paths = train_label_pos_paths + train_label_neg_paths
+    train_rate = len(train_img_pos_paths) / len(train_img_neg_paths)
+    print("[Train] positive samples num:{}, negative samples num:{}, rate(pos/neg)={:.3f}".format(
+            train_pos_num, len(train_img_neg_paths), train_rate))
     # 令验证集只包含阳性样本
     eval_img_paths = eval_img_pos_paths
     eval_label_paths = eval_label_pos_paths
-    print("#[Eval] drop negative samples\n")
+    print("[Eval] drop negative samples\n")
 
     # 检查图像与标签是否一一对应
     for img_path, label_path in zip(train_img_paths, train_label_paths):
