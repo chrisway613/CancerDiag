@@ -1,5 +1,5 @@
 # 是否使用GPU
-GPU = False
+GPU = True
 # GPU id
 DEVICE_ID = [0, 1]
 
@@ -7,6 +7,8 @@ DEVICE_ID = [0, 1]
 DATA_DIR = 'Data'
 # 可视化结果目录
 VISUAL_DIR = 'Visual'
+# 预测结果存放目录
+RESULT_DIR = 'Result'
 # 验证集划分比例
 SPLIT_RATIO = .2
 # 记录随机数种子
@@ -25,31 +27,37 @@ TINY_SIZE = (372, 256)
 TRAIN_MEAN = [208.644, 184.249, 206.240]
 TRAIN_STD = [54.267, 77.503, 51.150]
 # 训练集缩放后图像像素均值与标准差(RGB)
-TRAIN_SCALE_MEAN = [.773, .619, .751]
-TRAIN_SCALE_STD = [.220, .304, .202]
+# TRAIN_SCALE_MEAN = [.773, .619, .751]
+# TRAIN_SCALE_STD = [.220, .304, .202]
+# 训练集(阴阳比=1:10)缩放后图像像素均值与标准差(RGB)
+TRAIN_SCALE_MEAN = [.769, .625, .751]
+TRAIN_SCALE_STD = [.230, .322, .213]
 # 训练集缩放后阳性样本像素均值与标准差(RGB)
 TRAIN_SCALE_POS_MEAN = [.767, .626, .751]
 TRAIN_SCALE_POS_STD = [.233, .326, .215]
 # 验证集缩放后图像像素均值与标准差(RGB)
 EVAL_SCALE_MEAN = [.764, .623, .749]
 EVAL_SCALE_STD = [.233, .326, .214]
-
 # 测试集图像像素均值与标准差(RGB)
 TEST_MEAN = [209.849, 188.015, 208.279]
 TEST_STD = [53.722, 76.320, 50.763]
+# 测试集缩放后图像像素均值与标准差(RGB)
+TEST_SCALE_MEAN = [.757, .618, .743]
+TEST_SCALE_STD = [.235, .329, .221]
 
 EPOCHS = 300
+# 前5个周期对学习率使用warm-up策略
 WARM_UP_EPOCH = 5
 BATCH_SIZE = 8
-BASE_LR = 1e-3
-MIN_LR = 5e-5
+BASE_LR = 5e-3
+MIN_LR = 1e-4
 NUM_CLASSES = 1
 # 预测概率阀值
 THRESH = .5
 # 是否使用预训练权重
 PRETRAINED = False
-# 模型权重文件目录
-CHECKPOINT = 'Weights'
+# 模型权重文件路径
+CHECKPOINT = 'Weights/epoch120_best_0.64682.pt'
 # 是否使用同步BatchNorm
 SYN_BN = False
 
