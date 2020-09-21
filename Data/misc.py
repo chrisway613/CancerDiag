@@ -97,10 +97,10 @@ def train_eval_split():
     print("[Eval] positive samples num:{}, negative samples num:{}, rate(pos/neg)={:.3f}".format(
         eval_pos_num, eval_neg_num, eval_rate))
 
-    # 只训练阳性样本
-    train_img_paths = train_img_pos_paths
-    train_label_paths = train_label_pos_paths
-    print("#[Train] drop negative samples")
+    # # 只训练阳性样本
+    # train_img_paths = train_img_pos_paths
+    # train_label_paths = train_label_pos_paths
+    # print("#[Train] drop negative samples")
     # 令验证集只包含阳性样本
     eval_img_paths = eval_img_pos_paths
     eval_label_paths = eval_label_pos_paths
@@ -113,7 +113,10 @@ def train_eval_split():
         assert os.path.basename(img_path).split('.')[0] == os.path.basename(label_path).split('_mask.')[0]
 
     # 将划分后训练集、验证集以及格子的阴阳样本路径写入文件，之后可直接从文件读取
-    with shelve.open('paths/ds_paths.db') as db:
+    if not os.path.exists(os.path.dirname(DS_PATHS)):
+        os.makedirs(os.path.dirname(DS_PATHS))
+
+    with shelve.open(DS_PATHS) as db:
         db['train_img_paths'] = train_img_paths
         db['train_label_paths'] = train_label_paths
         db['train_img_pos_paths'] = train_img_pos_paths
@@ -283,3 +286,18 @@ def load_balanced_data(train_img_paths, eval_img_paths, train_label_paths, eval_
     # assert train_ds[0].get('image').shape[1:] == (TINY_SIZE[1], TINY_SIZE[0])
     # assert eval_ds[1].get('image').shape[1:] == (TINY_SIZE[1], TINY_SIZE[0])
     return train_ds, eval_ds
+
+
+def get_mask_pos_rate(ds, size):
+    w, h = size
+    total_pos_num = 0
+
+    for data in ds:
+        mask = data.get('label')
+        assert mask.shape[0] == h and mask.shape[1] == w
+        pos_num = mask.sum().item()
+        total_pos_num += pos_num
+
+    total_neg_num = w * h * len(ds) - total_pos_num
+    rate = total_neg_num / total_pos_num
+    print("positive num:{}, negative num:{}, rate[neg/pos]:{:.3f}".format(total_pos_num, total_neg_num, rate))

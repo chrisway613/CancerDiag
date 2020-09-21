@@ -6,7 +6,7 @@ import torch
 class Dice:
     """Dice loss(with OHEM, optional) & metric."""
 
-    def __init__(self, p=2, smooth=1., reduction='mean', ohem=False, top_k_ratio=1.):
+    def __init__(self, p=2, smooth=1e-8, reduction='mean', ohem=False, top_k_ratio=1.):
         if ohem:
             assert 0 < top_k_ratio < 1, "'top_k_ratio' must in range (0, 1) when in OHEM mode"
         self.ohem = ohem
@@ -31,28 +31,38 @@ class Dice:
         # (N,H*W)
         label = label.view(N, -1)
         pred = pred.view(N, -1)
+        prob = torch.sigmoid(pred)
+        m1 = label
+        m2 = prob
 
-        # 只对阳性样本计算dice loss
-        pos_indices = torch.where(label.sum(dim=1) > 0)[0]
-        # (num_pos,)
-        m1 = label[pos_indices]
-        m2 = torch.sigmoid(pred[pos_indices])
-
-        # # (N,1,H,W)->(N,H,W)
-        # prob = torch.sigmoid(pred.squeeze(1))
-        # # (N,H,W) -> (N,H*W)
-        # m1 = torch.reshape(prob, (N, -1))
-        # m2 = torch.reshape(label, (N, -1))
-
-        # (num_pos,)
+        # (N,)
         intersection = (m1 * m2).sum(dim=1)
         # 使用 p > 1 可使loss变大，加速收敛
         union = m1.pow(self.p).sum(dim=1) + m2.pow(self.p).sum(dim=1)
         coeff = (2. * intersection + self.smooth) / (union + self.smooth)
-        # (num_pos,) loss over positive samples
+        # (N,)
         loss = 1. - coeff
-        # assert loss.shape[0] == N and loss.ndim == 1
-        assert loss.shape == pos_indices.shape and loss.ndim == 1
+        assert loss.shape[0] == N and loss.ndim == 1
+
+        # # 只对阳性样本计算dice loss
+        # pos_indices = torch.where(label.sum(dim=1) > 0)[0]
+        # if len(pos_indices):
+        #     N = len(pos_indices)
+        #     # (num_pos,)
+        #     m1 = label[pos_indices]
+        #     m2 = torch.sigmoid(pred[pos_indices])
+        #
+        #     # (num_pos,)
+        #     intersection = (m1 * m2).sum(dim=1)
+        #     # 使用 p > 1 可使loss变大，加速收敛
+        #     union = m1.pow(self.p).sum(dim=1) + m2.pow(self.p).sum(dim=1)
+        #     coeff = (2. * intersection + self.smooth) / (union + self.smooth)
+        #     # (num_pos,) loss over positive samples
+        #     loss = 1. - coeff
+        #     assert loss.shape == pos_indices.shape and loss.ndim == 1
+        # else:
+        #     # 若该batch全是阴性样本，则dice loss置0
+        #     loss = torch.zeros(N, requires_grad=True, device=label.device)
 
         if self.ohem:
             # OHEM模式下，只取loss最大的topk样本进行学习

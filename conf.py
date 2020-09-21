@@ -1,5 +1,5 @@
 # 是否使用GPU
-GPU = True
+GPU = False
 # GPU id
 DEVICE_ID = [0, 1]
 
@@ -11,8 +11,8 @@ VISUAL_DIR = 'Visual'
 SPLIT_RATIO = .2
 # 记录随机数种子
 RANDOM_SEED = 'seed.txt'
-# 划分后训练集和验证集图像与标签的路径
-DS_PATHS = 'Data/paths/ds_path.db'
+# 记录划分后训练集和验证集的图像与标签路径
+DS_PATHS = 'Data/paths/ds_paths.db'
 
 # 图像输入网络时缩放的尺寸 --（宽，高）
 INPUT_SIZE = (744, 512)
@@ -41,8 +41,8 @@ TEST_STD = [53.722, 76.320, 50.763]
 EPOCHS = 300
 WARM_UP_EPOCH = 5
 BATCH_SIZE = 8
-BASE_LR = 5e-3
-MIN_LR = 1e-4
+BASE_LR = 1e-3
+MIN_LR = 5e-5
 NUM_CLASSES = 1
 # 预测概率阀值
 THRESH = .5

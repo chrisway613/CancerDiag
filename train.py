@@ -1,5 +1,6 @@
 import os
 import time
+import shelve
 import numpy as np
 
 import torch
@@ -14,7 +15,7 @@ from torchvision.transforms import Compose
 from conf import *
 from utils import *
 from models import *
-from Data.misc import train_eval_split, draw_tiny_samples, load_balanced_data
+from Data.misc import train_eval_split, draw_tiny_samples, load_balanced_data, get_mask_pos_rate
 from data_process import calc_train_eval_pixel, calc_scale_pixel
 
 from Data.load_data import CancerDataset
@@ -26,13 +27,26 @@ os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(device_id) for device_id in D
 def load_data():
     """Build Dataloader of training & validation set."""
 
-    if GPU:
-        dev = torch.device('cuda:{}'.format(DEVICE_ID[0]))
-    else:
-        dev = torch.device('cpu')
+    # if GPU:
+    #     dev = torch.device('cuda:{}'.format(DEVICE_ID[0]))
+    # else:
+    #     dev = torch.device('cpu')
 
     # 从总体训练集中划分一部分作为验证集
-    train_img_paths, eval_img_paths, train_label_paths, eval_label_paths = train_eval_split()
+    try:
+        # 从文件读取之前已经划分好的结果
+        with shelve.open(DS_PATHS, 'r') as db:
+            # train_img_paths = db['train_img_paths']
+            # train_label_paths = db['train_label_paths']
+            # 阳性样本路径，此处代表仅训练阳性样本
+            train_img_paths = db['train_img_pos_paths']
+            train_label_paths = db['train_label_pos_paths']
+            eval_img_paths = db['eval_img_paths']
+            eval_label_paths = db['eval_label_paths']
+    except:
+        # 若文件不存在则重新划分
+        train_img_paths, eval_img_paths, train_label_paths, eval_label_paths = train_eval_split()
+    # # 统计划分后在原图尺寸下训练集和验证集的像素均值
     # calc_train_eval_pixel(train_img_paths, eval_img_paths)
 
     # # 构造训练集
@@ -47,7 +61,8 @@ def load_data():
     #         # Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bicubic', align_corners=True),
     #         Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bilinear', align_corners=True),
     #         # 归一化
-    #         Norm(mean=TRAIN_SCALE_MEAN, std=TRAIN_SCALE_STD)
+    #         # Norm(mean=TRAIN_SCALE_MEAN, std=TRAIN_SCALE_STD)
+    #         Norm(mean=TRAIN_SCALE_POS_MEAN, std=TRAIN_SCALE_POS_STD)
     #     ])
     # )
     # # 统计缩放后训练集图像的均值和标准差
@@ -65,19 +80,27 @@ def load_data():
     #         # Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bicubic', align_corners=True),
     #         Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bilinear', align_corners=True),
     #         # 归一化
-    #         Norm(mean=TRAIN_SCALE_MEAN, std=TRAIN_SCALE_STD)
+    #         Norm(mean=EVAL_SCALE_MEAN, std=EVAL_SCALE_STD)
     #     ])
     # )
     # # 统计缩放后验证集图像的均值和标准差
     # calc_scale_pixel(eval_ds, INPUT_SIZE, dev)
 
-    # train_dl = DataLoader(train_ds, BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True, drop_last=True)
-    # eval_dl = DataLoader(eval_ds, BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
+    # assert train_ds[0].get('image').shape[1:] == (INPUT_SIZE[1], INPUT_SIZE[0])
+    # assert eval_ds[1].get('image').shape[1:] == (INPUT_SIZE[1], INPUT_SIZE[0])
+    # print("Train with image size(width, height): {}".format(INPUT_SIZE))
+
+    # train_dl = DataLoader(train_ds, BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
+    # eval_dl = DataLoader(eval_ds, BATCH_SIZE, num_workers=8, pin_memory=True)
+
     train_ds, eval_ds = load_balanced_data(train_img_paths, eval_img_paths, train_label_paths, eval_label_paths)
+    # 统计数据集mask的病灶面积占比
+    # get_mask_pos_rate(train_ds, INPUT_SIZE)
+    # 统计像素均值和标准差
     # calc_scale_pixel(train_ds, INPUT_SIZE, dev)
     # calc_scale_pixel(eval_ds, INPUT_SIZE, dev)
-    train_dl = DataLoader(train_ds, BATCH_SIZE, num_workers=2, pin_memory=True, drop_last=True)
-    eval_dl = DataLoader(eval_ds, BATCH_SIZE, num_workers=2, pin_memory=True)
+    train_dl = DataLoader(train_ds, BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
+    eval_dl = DataLoader(eval_ds, BATCH_SIZE, num_workers=8, pin_memory=True)
     print("batch size={}, {} batches in training set, {} batches in validation set\n".format(
         BATCH_SIZE, len(train_dl), len(eval_dl)))
 
@@ -208,7 +231,7 @@ def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev, wtr):
                 concat = torch.cat([pred, label.unsqueeze(0).unsqueeze(0).float(), binary_pred])
                 # padding是代表图像之间的间隔距离，.5代表使用灰色作为分隔颜色
                 image_grids = make_grid(concat, nrow=3, padding=3, pad_value=.5)
-                wtr.add_image('Train-Step{}-{}'.format(step, str(name)), image_grids, step)
+                wtr.add_image('Train-Epoch{}-Step{}-{}'.format(epoch + 1, it + 1, str(name)), image_grids, step)
 
     end_time = time.time()
     total_loss /= len(train_dataloader)
@@ -290,7 +313,7 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
 
                         concat = torch.cat([pred, mask, binary_pred])
                         image_grids = make_grid(concat, nrow=3, padding=3, pad_value=.5)
-                        wtr.add_image('Eval-Step{}-{}'.format(step, name), image_grids, step)
+                        wtr.add_image('Eval-Epoch{}-Step{}-{}'.format(epoch + 1, it + 1, name), image_grids, step)
 
             if it % LOG_CYCLE == 0:
                 batch_image_names = batch_data.get('image_name')
@@ -350,7 +373,10 @@ if __name__ == '__main__':
     # 损失函数
     # criterion = Dice()
     # criterion = BCE(pos_weight=torch.full((NUM_CLASSES,), 3., device=device))
-    criterion = BCEDice()
+    # # 数据集mask中，0的区域约是1的区域的7.5倍，因此这里在BCE中设置类别1的loss是类别0的7.5倍
+    # criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 7.5, device=device))
+    # 数据集mask中，阳性样本0的区域约是1的区域的3.214倍，因此这里在BCE中设置类别1的loss是类别0的3倍
+    criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 3., device=device))
     # # OHEM, 使用前75%的困难样本进行学习
     # criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 3., device=device), ohem=True, top_k_ratio=.75)
 
@@ -398,10 +424,16 @@ if __name__ == '__main__':
             # 若当前评估性能优于之前，则保存权重
             if dice > prev_dice:
                 print("Gain best dice:{:.5f}".format(dice))
-                f = os.path.join(CHECKPOINT, 'best.pt')
+                f = os.path.join(CHECKPOINT, 'epoch{}_best_{:.5f}.pt'.format(epoch + 1, dice))
                 torch.save(model, f)
                 print("saved weights to {}\n".format(f))
                 prev_dice = dice
+            # 否则每100个epoch保存下权重
+            else:
+                if (epoch + 1) % 100 == 0:
+                    f = os.path.join(CHECKPOINT, 'epoch{}_{:.5f}.pt'.format(epoch + 1, dice))
+                    torch.save(model, f)
+                    print("Epoch[{}] saved weights to {}\n".format(epoch + 1, f))
 
         # 预热期过后，按照策略更新学习率
         if epoch >= WARM_UP_EPOCH:
