@@ -1,4 +1,4 @@
-__all__ = ('PadResize', 'ToNormTensor', 'Scale', 'PILResize', 'ConvertToTensor', 'Norm',)
+__all__ = ('PadResize', 'ToNormTensor', 'Scale', 'PILResize', 'ConvertToTensor', 'Norm', 'RandomFlip', 'SomeAugs',)
 
 import torch
 import torch.nn.functional as F
@@ -8,7 +8,8 @@ import numpy as np
 from PIL import Image
 from collections import Sequence
 
-from torchvision.transforms import Compose, ToTensor, Normalize
+import imgaug.augmenters as iaa
+from torchvision.transforms import Compose, ToTensor, Normalize, RandomHorizontalFlip, RandomVerticalFlip
 
 
 class PadResize:
@@ -251,8 +252,8 @@ class Scale:
             # mask_arr = mask_ts.squeeze().numpy()
             # 恢复为uint8类型
             # mask = Image.fromarray(mask_arr.astype('uint8'))
-            # float->long
-            mask = resized_mask_ts.squeeze().long()
+            # float->int
+            mask = resized_mask_ts.squeeze().int()
             h, w = mask.shape
             assert h == self.size[0] and w == self.size[1]
             item.update(label=mask)
@@ -280,5 +281,110 @@ class PILResize:
             resized_mask = mask.resize(self.size, Image.NEAREST)
             assert resized_mask.size == self.size
             item.update(label=resized_mask)
+
+        return item
+
+
+class RandHorizonFlip:
+    """
+    Horizontally flip the given PIL Image randomly with a given probability.
+    """
+
+    def __init__(self, prob=.5):
+        """
+        Args:
+            prob (float): probability of the image being flipped. Default value is 0.5.
+        """
+        assert 0. <= prob <= 1., "probability value of the image being flipped must be in range [0, 1]!"
+        self._transform = RandomHorizontalFlip(p=prob)
+
+    def __call__(self, item):
+        img = item.get('image')
+        flipped_img = self._transform(img)
+        item.update(image=flipped_img)
+
+        label = item.get('label')
+        if label:
+            flipped_label = self._transform(label)
+            item.update(label=flipped_label)
+
+        return item
+
+
+class RandVerticalFlip:
+    """Vertically flip the given PIL Image randomly with a given probability."""
+
+    def __init__(self, prob=.5):
+        """
+            Args:
+                prob (float): probability of the image being flipped. Default value is 0.5.
+        """
+        assert 0. <= prob <= 1., "probability value of the image being flipped must be in range [0, 1]!"
+        self._transform = RandomVerticalFlip(p=prob)
+
+    def __call__(self, item):
+        img = item.get('image')
+        flipped_img = self._transform(img)
+        item.update(image=flipped_img)
+
+        label = item.get('label')
+        if label:
+            flipped_label = self._transform(label)
+            item.update(label=flipped_label)
+
+        return item
+
+
+class RandomFlip:
+    """Horizontally or Vertically flip the given PIL Image randomly with a given probability."""
+
+    def __init__(self, prob_h=.5, prob_v=.5):
+        """
+            Args:
+                prob_h (float): probability of the image being horizontally flipped. Default value is 0.5;
+                prob_v (float): probability of the image being vertically flipped. Default value is 0.5;
+        """
+
+        assert 0 <= prob_h <= 1 and 0 <= prob_v <= 1, \
+            "probability value of the image being flipped must be in range [0, 1]"
+
+        self._horizon = RandomHorizontalFlip(p=prob_h)
+        self._vertical = RandomVerticalFlip(p=prob_v)
+        self._flip = Compose([self._horizon, self._vertical])
+
+    def __call__(self, item):
+        image = item.get('image')
+        flipped_image = self._flip(image)
+        item.update(image=flipped_image)
+
+        mask = item.get('label')
+        if mask is not None:
+            flipped_mask = self._flip(mask)
+            item.update(label=flipped_mask)
+
+        return item
+
+
+class SomeAugs:
+    """Randomly pick some augmentations apply to the PIL Image."""
+
+    def __init__(self):
+        self._aug = iaa.SomeOf(
+            n=(0, 2),
+            children=[
+                iaa.Sometimes(then_list=iaa.GaussianBlur(sigma=(0, .5))),
+                iaa.Sharpen(alpha=(0, 1.0), lightness=(0.75, 1.5)),
+                iaa.AddToHueAndSaturation((-20, 20)),
+                iaa.LinearContrast((0.5, 2.0), per_channel=0.5)
+            ],
+            random_order=True,
+            random_state=0
+        )
+
+    def __call__(self, item):
+        image = item.get('image')
+        image_aug = self._aug.augment_image(np.asarray(image))
+        image = Image.fromarray(image_aug)
+        item.update(image=image)
 
         return item

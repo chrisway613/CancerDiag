@@ -26,12 +26,15 @@ TINY_SIZE = (372, 256)
 # 原始训练集（划分前）原图像像素均值与标准差(RGB)
 TRAIN_MEAN = [208.644, 184.249, 206.240]
 TRAIN_STD = [54.267, 77.503, 51.150]
-# 训练集缩放后图像像素均值与标准差(RGB)
+# 训练集(阴阳比1:1)缩放后图像像素均值与标准差(RGB)
 # TRAIN_SCALE_MEAN = [.773, .619, .751]
 # TRAIN_SCALE_STD = [.220, .304, .202]
+# 训练集(阴阳比1:1)数据增强后图像像素均值与标准差(RGB)
+TRAIN_SCALE_MEAN = [.768, .621, .744]
+TRAIN_SCALE_STD = [.243, .322, .230]
 # 训练集(阴阳比=1:10)缩放后图像像素均值与标准差(RGB)
-TRAIN_SCALE_MEAN = [.769, .625, .751]
-TRAIN_SCALE_STD = [.230, .322, .213]
+# TRAIN_SCALE_MEAN = [.769, .625, .751]
+# TRAIN_SCALE_STD = [.230, .322, .213]
 # 训练集缩放后阳性样本像素均值与标准差(RGB)
 TRAIN_SCALE_POS_MEAN = [.767, .626, .751]
 TRAIN_SCALE_POS_STD = [.233, .326, .215]
@@ -57,7 +60,7 @@ THRESH = .5
 # 是否使用预训练权重
 PRETRAINED = False
 # 模型权重文件路径
-CHECKPOINT = 'Weights/epoch120_best_0.64682.pt'
+CHECKPOINT = 'Weights/'
 # 是否使用同步BatchNorm
 SYN_BN = False
 

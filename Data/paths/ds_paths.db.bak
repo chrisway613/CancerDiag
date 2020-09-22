@@ -1,0 +1,6 @@
+'train_img_paths', (265728, 48946)
+'train_label_paths', (314880, 55871)
+'train_img_pos_paths', (105472, 20123)
+'train_label_pos_paths', (125952, 23023)
+'eval_img_paths', (148992, 5024)
+'eval_label_paths', (154112, 5784)

@@ -15,11 +15,12 @@ from torchvision.transforms import Compose
 from conf import *
 from utils import *
 from models import *
+from SynBn import convert_model
 from Data.misc import train_eval_split, draw_tiny_samples, load_balanced_data, get_mask_pos_rate
 from data_process import calc_train_eval_pixel, calc_scale_pixel
 
 from Data.load_data import CancerDataset
-from Data.transform import ConvertToTensor, Norm, Scale
+from Data.transform import ConvertToTensor, Norm, Scale, RandomFlip, SomeAugs
 
 os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(device_id) for device_id in DEVICE_ID])
 
@@ -38,7 +39,7 @@ def load_data():
         with shelve.open(DS_PATHS, 'r') as db:
             train_img_paths = db['train_img_paths']
             train_label_paths = db['train_label_paths']
-            # # 阳性样本路径，此处代表仅训练阳性样本
+            # 阳性样本路径，此处代表仅训练阳性样本
             # train_img_paths = db['train_img_pos_paths']
             # train_label_paths = db['train_label_pos_paths']
             eval_img_paths = db['eval_img_paths']
@@ -49,63 +50,66 @@ def load_data():
     # # 统计划分后在原图尺寸下训练集和验证集的像素均值
     # calc_train_eval_pixel(train_img_paths, eval_img_paths)
 
-    # 构造训练集
-    train_ds = CancerDataset(
-        img_paths=train_img_paths,
-        label_paths=train_label_paths,
-        transform=Compose([
-            # PILResize(INPUT_SIZE, mode=Image.BILINEAR),
-            # 转换为0-1张量
-            ConvertToTensor(),
-            # 尺寸缩放，短边（高）缩放到512，同时保持基于训练集图像统计的宽高比均值
-            # Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bicubic', align_corners=True),
-            Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bilinear', align_corners=True),
-            # 归一化
-            Norm(mean=TRAIN_SCALE_MEAN, std=TRAIN_SCALE_STD)
-            # Norm(mean=TRAIN_SCALE_POS_MEAN, std=TRAIN_SCALE_POS_STD)
-        ]),
-        # 如果排序，Dataloader drop_last=True时会将最后几个阳性样本drop掉，而我们构造训练集样本路径时是将阳性样本排前面的
-        sort=False
-    )
+    # # 构造训练集
+    # train_ds = CancerDataset(
+    #     img_paths=train_img_paths,
+    #     label_paths=train_label_paths,
+    #     transform=Compose([
+    #         RandomFlip(prob_h=.3, prob_v=.1),
+    #         SomeAugs(),
+    #         # PILResize(INPUT_SIZE, mode=Image.BILINEAR),
+    #         # 转换为0-1张量
+    #         ConvertToTensor(),
+    #         # 尺寸缩放，短边（高）缩放到512，同时保持基于训练集图像统计的宽高比均值
+    #         # Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bicubic', align_corners=True),
+    #         Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bilinear', align_corners=True),
+    #         # 归一化
+    #         Norm(mean=TRAIN_SCALE_MEAN, std=TRAIN_SCALE_STD)
+    #         # Norm(mean=TRAIN_SCALE_POS_MEAN, std=TRAIN_SCALE_POS_STD)
+    #     ]),
+    #     # 如果排序，Dataloader drop_last=True时会将最后几个阳性样本drop掉，而我们构造训练集样本路径时是将阳性样本排前面的
+    #     sort=False
+    # )
     # # 统计缩放后训练集图像的均值和标准差
     # calc_scale_pixel(train_ds, INPUT_SIZE, dev)
     # # 统计数据集mask的病灶面积占比
     # get_mask_pos_rate(train_ds, INPUT_SIZE)
 
-    # 构造验证集
-    eval_ds = CancerDataset(
-        img_paths=eval_img_paths,
-        label_paths=eval_label_paths,
-        transform=Compose([
-            # PILResize(INPUT_SIZE, mode=Image.BILINEAR),
-            # 转换为0-1张量
-            ConvertToTensor(),
-            # 尺寸缩放，短边（高）缩放到512，同时保持基于训练集图像统计的宽高比均值
-            # Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bicubic', align_corners=True),
-            Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bilinear', align_corners=True),
-            # 归一化
-            Norm(mean=EVAL_SCALE_MEAN, std=EVAL_SCALE_STD)
-        ])
-    )
+    # # 构造验证集
+    # eval_ds = CancerDataset(
+    #     img_paths=eval_img_paths,
+    #     label_paths=eval_label_paths,
+    #     transform=Compose([
+    #         # PILResize(INPUT_SIZE, mode=Image.BILINEAR),
+    #         # 转换为0-1张量
+    #         ConvertToTensor(),
+    #         # 尺寸缩放，短边（高）缩放到512，同时保持基于训练集图像统计的宽高比均值
+    #         # Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bicubic', align_corners=True),
+    #         Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bilinear', align_corners=True),
+    #         # 归一化
+    #         Norm(mean=EVAL_SCALE_MEAN, std=EVAL_SCALE_STD)
+    #     ])
+    # )
     # # 统计缩放后验证集图像的均值和标准差
     # calc_scale_pixel(eval_ds, INPUT_SIZE, dev)
 
-    assert train_ds[0].get('image').shape[1:] == (INPUT_SIZE[1], INPUT_SIZE[0])
-    assert eval_ds[1].get('image').shape[1:] == (INPUT_SIZE[1], INPUT_SIZE[0])
-    print("Train with image size(width, height): {}".format(INPUT_SIZE))
+    # assert train_ds[0].get('image').shape[1:] == (INPUT_SIZE[1], INPUT_SIZE[0])
+    # assert eval_ds[1].get('image').shape[1:] == (INPUT_SIZE[1], INPUT_SIZE[0])
+    # print("Train with image size(width, height): {}".format(INPUT_SIZE))
+    #
+    # # num_workers设置为内核数量能加快加载batch的耗时，节省一倍多训练时间；pin_memory=True也是，与数据加载时内存锁页相关
+    # train_dl = DataLoader(train_ds, BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
+    # eval_dl = DataLoader(eval_ds, BATCH_SIZE, num_workers=8, pin_memory=True)
 
-    # num_workers设置为内核数量能加快加载batch的耗时，节省一倍多训练时间；pin_memory=True也是，与数据加载时内存锁页相关
-    train_dl = DataLoader(train_ds, BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
-    eval_dl = DataLoader(eval_ds, BATCH_SIZE, num_workers=8, pin_memory=True)
-
-    # train_ds, eval_ds = load_balanced_data(train_img_paths, eval_img_paths, train_label_paths, eval_label_paths)
+    train_ds, eval_ds = load_balanced_data(train_img_paths, eval_img_paths, train_label_paths, eval_label_paths)
     # # 统计数据集mask的病灶面积占比
     # get_mask_pos_rate(train_ds, INPUT_SIZE)
     # # 统计像素均值和标准差
     # calc_scale_pixel(train_ds, INPUT_SIZE, dev)
     # calc_scale_pixel(eval_ds, INPUT_SIZE, dev)
-    # train_dl = DataLoader(train_ds, BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
-    # eval_dl = DataLoader(eval_ds, BATCH_SIZE, num_workers=8, pin_memory=True)
+
+    train_dl = DataLoader(train_ds, BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
+    eval_dl = DataLoader(eval_ds, BATCH_SIZE, num_workers=8, pin_memory=True)
     print("batch size={}, {} batches in training set, {} batches in validation set\n".format(
         BATCH_SIZE, len(train_dl), len(eval_dl)))
 
@@ -147,8 +151,8 @@ def build_model(dev=None):
 
     # 使用同步的批次归一化
     if SYN_BN:
-        print("Use Synchronized Batch Normalization.")
-        pass
+        net = convert_model(net)
+        print("Use Synchronized Batch Normalization\n")
 
     return net
 
@@ -163,7 +167,7 @@ def set_optim(net):
 
     # 学习率策略
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, 5, eta_min=MIN_LR)
-    # 动态调整的余弦退火，初始周期为4，即４个周期后restart为初始学习率，之后呈平方增长
+    # 动态调整的余弦退火，初始周期为4，即4个周期后restart为初始学习率，之后呈平方增长
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, 4, T_mult=2, eta_min=MIN_LR)
     return optim, scheduler
 
@@ -375,14 +379,17 @@ if __name__ == '__main__':
     model = build_model(dev=device)
     # 定制优化器和学习率策略
     optimizer, scheduler = set_optim(model)
+
     # 损失函数
     # criterion = Dice()
-    # # 数据集mask中，0的区域约是1的区域的7.5倍，因此这里在BCE中设置类别1的loss是类别0的7.5倍
-    # criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 7.428, device=device))
-    # 数据集mask中，阳性样本0的区域约是1的区域的3.214倍，因此这里在BCE中设置类别1的loss是类别0的3.214倍
+
+    # 数据集mask中，0的区域约是1的区域的7.5倍，因此这里在BCE中设置类别1的loss是类别0的7.428倍
+    criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 7.428, device=device))
+    # # 数据集mask中，阳性样本0的区域约是1的区域的3.214倍，因此这里在BCE中设置类别1的loss是类别0的3.214倍
     # criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 3.214, device=device))
-    # 划分训练集（阴阳比10:1）后，在mask中，0的区域约是1的区域的3.636倍，因此这里在BCE中设置类别1的loss是类别0的3.636倍
-    criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 3.636, device=device))
+    # # 划分训练集（阴阳比10:1）后，在mask中，0的区域约是1的区域的3.636倍，因此这里在BCE中设置类别1的loss是类别0的3.636倍
+    # criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 3.636, device=device))
+
     # # OHEM, 使用前75%的困难样本进行学习
     # criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 3., device=device), ohem=True, top_k_ratio=.75)
 
