@@ -31,45 +31,49 @@ class Dice:
         # (N,H*W)
         label = label.view(N, -1)
         pred = pred.view(N, -1)
-        prob = torch.sigmoid(pred)
-        m1 = label
-        m2 = prob
-
-        # (N,)
-        intersection = (m1 * m2).sum(dim=1)
-        # 使用 p > 1 可使loss变大，加速收敛
-        union = m1.pow(self.p).sum(dim=1) + m2.pow(self.p).sum(dim=1)
-        coeff = (2. * intersection + self.smooth) / (union + self.smooth)
-        # (N,)
-        loss = 1. - coeff
-        assert loss.shape[0] == N and loss.ndim == 1
-
-        # # 只对阳性样本计算dice loss
-        # pos_indices = torch.where(label.sum(dim=1) > 0)[0]
-        # if len(pos_indices):
-        #     N = len(pos_indices)
-        #     # (num_pos,)
-        #     m1 = label[pos_indices]
-        #     m2 = torch.sigmoid(pred[pos_indices])
+        # prob = torch.sigmoid(pred)
+        # m1 = label
+        # m2 = prob
         #
-        #     # (num_pos,)
-        #     intersection = (m1 * m2).sum(dim=1)
-        #     # 使用 p > 1 可使loss变大，加速收敛
-        #     union = m1.pow(self.p).sum(dim=1) + m2.pow(self.p).sum(dim=1)
-        #     coeff = (2. * intersection + self.smooth) / (union + self.smooth)
-        #     # (num_pos,) loss over positive samples
-        #     loss = 1. - coeff
-        #     assert loss.shape == pos_indices.shape and loss.ndim == 1
-        # else:
-        #     # 若该batch全是阴性样本，则dice loss置0
-        #     loss = torch.zeros(N, requires_grad=True, device=label.device)
+        # # (N,)
+        # intersection = (m1 * m2).sum(dim=1)
+        # # 使用 p > 1 可使loss变大，加速收敛
+        # union = m1.pow(self.p).sum(dim=1) + m2.pow(self.p).sum(dim=1)
+        # coeff = (2. * intersection + self.smooth) / (union + self.smooth)
+        # # (N,)
+        # loss = 1. - coeff
+        # assert loss.shape[0] == N and loss.ndim == 1
+
+        # 只对阳性样本计算dice loss
+        pos_indices = torch.where(label.sum(dim=1) > 0)[0]
+        if len(pos_indices):
+            N = len(pos_indices)
+            # (num_pos,)
+            m1 = label[pos_indices]
+            m2 = torch.sigmoid(pred[pos_indices])
+
+            # (num_pos,)
+            intersection = (m1 * m2).sum(dim=1)
+            # 使用 p > 1 可使loss变大，加速收敛
+            union = m1.pow(self.p).sum(dim=1) + m2.pow(self.p).sum(dim=1)
+            coeff = (2. * intersection + self.smooth) / (union + self.smooth)
+            # (num_pos,) loss over positive samples
+            loss = 1. - coeff
+            assert loss.shape == pos_indices.shape and loss.ndim == 1
+        else:
+            # 若该batch全是阴性样本，则dice loss置0
+            loss = torch.zeros(N, requires_grad=True, device=label.device)
 
         if self.ohem:
             # OHEM模式下，只取loss最大的topk样本进行学习
             keep_num = max(1, int(self.top_k_ratio * N))
             loss, indices = loss.topk(keep_num)
+            if len(pos_indices):
+                # 阳性样本的索引映射到原批次索引
+                indices = pos_indices[indices]
         else:
-            indices = torch.arange(N)
+            # 没有阳性样本时索引就是原批次索引
+            indices = pos_indices if len(pos_indices) else torch.arange(N)
 
         if self.reduction == 'mean':
             return torch.mean(loss), indices
@@ -115,6 +119,10 @@ class BCE(torch.nn.BCEWithLogitsLoss):
         else:
             super(BCE, self).__init__(weight=weight, reduction=reduction, pos_weight=pos_weight)
 
+        # 用另一个属性来记录reduction,因为OHEM时要用reduction='none'来实例化pytorch的BCE，
+        # 这样BCE返回的loss才能是每个样本的loss，以便下一步筛选topk
+        self._reduction = reduction
+
         self.ohem = ohem
         self.top_k_ratio = top_k_ratio
         print("#Train with BCEWithLogitsLoss\n")
@@ -128,17 +136,17 @@ class BCE(torch.nn.BCEWithLogitsLoss):
 
         if self.ohem:
             assert loss.shape[0] == N and loss.ndim == 2
-            # (N,H*W)->(N,)
-            loss = loss.sum(dim=1)
+            # (N,H*W)->(N,)　每个样本的平均loss，这里BCE是对每个像素点进行计算的
+            loss = loss.mean(dim=1)
             # OHEM模式下，只取loss最大的topk样本进行学习
             keep_num = max(1, int(self.top_k_ratio * N))
             top_k_loss, indices = loss.topk(keep_num)
 
-            if self.reduction == 'mean':
+            if self._reduction == 'mean':
                 return top_k_loss.mean(), indices
-            elif self.reduction == 'sum':
+            elif self._reduction == 'sum':
                 return top_k_loss.sum(), indices
-            elif self.reduction == 'none':
+            elif self._reduction == 'none':
                 return top_k_loss, indices
             else:
                 raise NotImplementedError("Not implemented with reduction '{}'".format(self.reduction))
@@ -151,9 +159,10 @@ class BCEDice:
     """Combine BCEWithLogitsLoss with DiceLoss, plus OHEM.
        pos_weight是正样本的bce loss权重，通常设置为正负样本比的倒数。"""
 
-    def __init__(self, pos_weight=None, p=2, smooth=1., reduction='mean', ohem=False, top_k_ratio=1.):
+    def __init__(self, pos_weight=None, p=2, smooth=1e-8, reduction='mean', ohem=False, top_k_ratio=1.):
         self.bce = BCE(reduction=reduction, pos_weight=pos_weight, ohem=ohem, top_k_ratio=top_k_ratio)
-        self.dice = Dice(p, smooth, reduction, ohem, top_k_ratio)
+        self.dice = Dice(p, smooth, reduction)
+        # self.dice = Dice(p, smooth, reduction, ohem, top_k_ratio)
         print("#Train with BCEWithLogitsLoss & DiceLoss\n")
 
     def __call__(self, pred, target):
