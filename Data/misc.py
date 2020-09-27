@@ -122,7 +122,7 @@ def train_eval_split():
     # # 检查路径的有效性
     # for path in train_label_neg_paths:
     #     assert os.path.exists(path)
-
+    #
     # # 阳性:阴性=10:1组成训练集，加入小比例的阴性样本相当于噪声和扰动，提高泛化能力，避免过拟合
     # train_img_paths = train_img_pos_paths + train_img_neg_paths
     # train_label_paths = train_label_pos_paths + train_label_neg_paths
@@ -288,8 +288,9 @@ def load_balanced_data(train_img_paths, eval_img_paths, train_label_paths, eval_
     train_ds = CancerDataset(
         img_paths=train_img_paths, label_paths=train_label_paths,
         transform=Compose([
+            # 30%的概率水平翻转、10%的概率垂直翻转
             RandomFlip(prob_h=.3, prob_v=.1),
-            SomeAugs(),
+            # SomeAugs(),
             ConvertToTensor(),
             Scale(size=(INPUT_SIZE[1], INPUT_SIZE[0]), mode='bilinear', align_corners=True),
             # Scale(size=(TINY_SIZE[1], TINY_SIZE[0]), mode='bilinear', align_corners=True),
@@ -320,14 +321,26 @@ def load_balanced_data(train_img_paths, eval_img_paths, train_label_paths, eval_
 
 def get_mask_pos_rate(ds, size):
     w, h = size
+    # avg_rate = 0.
+    # pos_sample = 0
     total_pos_num = 0
+    total_neg_num = 0
 
     for data in ds:
         mask = data.get('label')
         assert mask.shape[0] == h and mask.shape[1] == w
         pos_num = mask.sum().item()
-        total_pos_num += pos_num
+        # if not pos_num:
+        #     continue
 
-    total_neg_num = w * h * len(ds) - total_pos_num
+        neg_num = w * h - pos_num
+        total_neg_num += neg_num
+        total_pos_num += pos_num
+        # avg_rate += neg_num / pos_num
+        # pos_sample += 1
+
+    # avg_rate /= pos_sample
+    # total_neg_num = w * h * len(ds) - total_pos_num
     rate = total_neg_num / total_pos_num
     print("positive num:{}, negative num:{}, rate[neg/pos]:{:.3f}".format(total_pos_num, total_neg_num, rate))
+    # print("positive num:{}, negative num:{}, rate[neg/pos]:{:.3f}".format(total_pos_num, total_neg_num, avg_rate))

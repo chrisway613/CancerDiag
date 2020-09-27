@@ -3,12 +3,13 @@ __all__ = ('PadResize', 'ToNormTensor', 'Scale', 'PILResize', 'ConvertToTensor',
 import torch
 import torch.nn.functional as F
 
+import random
 import numpy as np
+import imgaug.augmenters as iaa
 
 from PIL import Image
 from collections import Sequence
 
-import imgaug.augmenters as iaa
 from torchvision.transforms import Compose, ToTensor, Normalize, RandomHorizontalFlip, RandomVerticalFlip
 
 
@@ -285,56 +286,6 @@ class PILResize:
         return item
 
 
-class RandHorizonFlip:
-    """
-    Horizontally flip the given PIL Image randomly with a given probability.
-    """
-
-    def __init__(self, prob=.5):
-        """
-        Args:
-            prob (float): probability of the image being flipped. Default value is 0.5.
-        """
-        assert 0. <= prob <= 1., "probability value of the image being flipped must be in range [0, 1]!"
-        self._transform = RandomHorizontalFlip(p=prob)
-
-    def __call__(self, item):
-        img = item.get('image')
-        flipped_img = self._transform(img)
-        item.update(image=flipped_img)
-
-        label = item.get('label')
-        if label:
-            flipped_label = self._transform(label)
-            item.update(label=flipped_label)
-
-        return item
-
-
-class RandVerticalFlip:
-    """Vertically flip the given PIL Image randomly with a given probability."""
-
-    def __init__(self, prob=.5):
-        """
-            Args:
-                prob (float): probability of the image being flipped. Default value is 0.5.
-        """
-        assert 0. <= prob <= 1., "probability value of the image being flipped must be in range [0, 1]!"
-        self._transform = RandomVerticalFlip(p=prob)
-
-    def __call__(self, item):
-        img = item.get('image')
-        flipped_img = self._transform(img)
-        item.update(image=flipped_img)
-
-        label = item.get('label')
-        if label:
-            flipped_label = self._transform(label)
-            item.update(label=flipped_label)
-
-        return item
-
-
 class RandomFlip:
     """Horizontally or Vertically flip the given PIL Image randomly with a given probability."""
 
@@ -348,20 +299,30 @@ class RandomFlip:
         assert 0 <= prob_h <= 1 and 0 <= prob_v <= 1, \
             "probability value of the image being flipped must be in range [0, 1]"
 
-        self._horizon = RandomHorizontalFlip(p=prob_h)
-        self._vertical = RandomVerticalFlip(p=prob_v)
-        self._flip = Compose([self._horizon, self._vertical])
+        self.prob_h = prob_h
+        self.prob_v = prob_v
+        # # 这里把翻转的概率设为1，因为实际是用random产生的随机概率与实例化时传进来的prob参数比较，见以下__call__方法
+        # self._horizon = RandomHorizontalFlip(p=1.)
+        # self._vertical = RandomVerticalFlip(p=1.)
 
     def __call__(self, item):
         image = item.get('image')
-        flipped_image = self._flip(image)
-        item.update(image=flipped_image)
-
+        assert isinstance(image, Image.Image), 'image should be PIL Image. Got {}'.format(type(image))
         mask = item.get('label')
         if mask is not None:
-            flipped_mask = self._flip(mask)
-            item.update(label=flipped_mask)
+            assert isinstance(mask, Image.Image), 'mask should be PIL Image. Got {}'.format(type(image))
 
+        if random.random() <= self.prob_h:
+            image = image.transpose(Image.FLIP_LEFT_RIGHT)  # self._horizon(image)
+            if mask is not None:
+                mask = mask.transpose(Image.FLIP_LEFT_RIGHT)  # self._horizon(mask)
+
+        if random.random() <= self.prob_v:
+            image = image.transpose(Image.FLIP_TOP_BOTTOM)  # self._vertical(image)
+            if mask is not None:
+                mask = mask.transpose(Image.FLIP_TOP_BOTTOM)  # self._vertical(mask)
+
+        item.update(image=image, label=mask)
         return item
 
 

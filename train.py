@@ -27,7 +27,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(device_id) for device_id in D
 
 def load_data():
     """Build Dataloader of training & validation set."""
-
+    #
     # if GPU:
     #     dev = torch.device('cuda:{}'.format(DEVICE_ID[0]))
     # else:
@@ -55,8 +55,8 @@ def load_data():
     #     img_paths=train_img_paths,
     #     label_paths=train_label_paths,
     #     transform=Compose([
-    #         RandomFlip(prob_h=.3, prob_v=.1),
-    #         SomeAugs(),
+    #         # RandomFlip(prob_h=.3, prob_v=.1),
+    #         # SomeAugs(),
     #         # PILResize(INPUT_SIZE, mode=Image.BILINEAR),
     #         # 转换为0-1张量
     #         ConvertToTensor(),
@@ -96,7 +96,7 @@ def load_data():
     # assert train_ds[0].get('image').shape[1:] == (INPUT_SIZE[1], INPUT_SIZE[0])
     # assert eval_ds[1].get('image').shape[1:] == (INPUT_SIZE[1], INPUT_SIZE[0])
     # print("Train with image size(width, height): {}".format(INPUT_SIZE))
-    #
+
     # # num_workers设置为内核数量能加快加载batch的耗时，节省一倍多训练时间；pin_memory=True也是，与数据加载时内存锁页相关
     # train_dl = DataLoader(train_ds, BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
     # eval_dl = DataLoader(eval_ds, BATCH_SIZE, num_workers=8, pin_memory=True)
@@ -108,6 +108,7 @@ def load_data():
     # calc_scale_pixel(train_ds, INPUT_SIZE, dev)
     # calc_scale_pixel(eval_ds, INPUT_SIZE, dev)
 
+    # num_workers设置为内核数量能加快加载batch的耗时，节省一倍多训练时间；pin_memory=True也是，与数据加载时内存锁页相关
     train_dl = DataLoader(train_ds, BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
     eval_dl = DataLoader(eval_ds, BATCH_SIZE, num_workers=8, pin_memory=True)
     print("batch size={}, {} batches in training set, {} batches in validation set\n".format(
@@ -140,14 +141,14 @@ def build_model(dev=None):
 
         if PRETRAINED:
             # 使用nn.DataParallel后保存的权重会多一层.module封装
-            state_dict = torch.load(CHECKPOINT).module.state_dict()
+            state_dict = torch.load(WEIGHT).module.state_dict()
             net.module.load_state_dict(state_dict)
-            print("load pre-trained weight:{}".format(CHECKPOINT))
+            print("load pre-trained weight: {}".format(WEIGHT))
     else:
         if PRETRAINED:
-            state_dict = torch.load(CHECKPOINT).state_dict()
+            state_dict = torch.load(WEIGHT).state_dict()
             net.load_state_dict(state_dict)
-            print("load pre-trained weight:{}".format(CHECKPOINT))
+            print("load pre-trained weight: {}".format(WEIGHT))
 
     # 使用同步的批次归一化
     if SYN_BN:
@@ -180,6 +181,8 @@ def set_lr(optim, lr):
 def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev, wtr):
     # 一个训练周期的平均loss
     total_loss = 0.
+    # # 加上正则化的loss
+    # total_reg_loss = 0.
     total_bce_loss = 0.
     total_dice_loss = 0.
     # 记录训练用时
@@ -199,29 +202,46 @@ def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev, wtr):
         # 前向反馈
         outputs = net(batch_images)
         # 计算loss
-        # loss = loss_func(outputs, batch_labels)
+        # loss, _ = loss_func(outputs, batch_labels)
         loss, bce_loss, dice_loss, bce_indices, dice_indices = loss_func(outputs, batch_labels)
+
+        # # L2正则化
+        # l2 = 0.
+        # for name, param in model.named_parameters():
+        #     # 仅对权重施加(忽略bias)
+        #     if 'weight' in name:
+        #         # L2范数的平方
+        #         l2 += torch.norm(param) ** 2
+        #
+        # # WEIGHT_DECAY - 正则化惩罚系数
+        # reg_loss = loss + WEIGHT_DECAY / (2 * train_dataloader.batch_size) * l2
 
         # 反向传播梯度
         loss.backward()
+        # reg_loss.backward()
         # 优化器更新参数
         optim.step()
 
         total_bce_loss += bce_loss.item()
         total_dice_loss += dice_loss.item()
         total_loss += loss.detach().item()
+        # total_reg_loss += reg_loss.detach().item()
 
         if it % LOG_CYCLE == 0:
             batch_image_names = batch_data.get('image_name')
-            # batch_image_names_arr = np.asarray(batch_image_names)
-            # bce_top_k_images = batch_image_names_arr[bce_indices.numpy()]
-            # dice_top_k_images = batch_image_names_arr[dice_indices.numpy()]
-            # progress.set_postfix_str("Iter[{}]: loss={:.3f}, images:{}".format(it + 1, loss.item(), batch_image_names))
+            batch_image_names_arr = np.asarray(batch_image_names)
+            bce_top_k_images = batch_image_names_arr[bce_indices.cpu().numpy()]
+            dice_top_k_images = batch_image_names_arr[dice_indices.cpu().numpy()]
+            # progress.set_postfix_str("Iter[{}]: loss={:.5f}, images:{}".format(it + 1, loss.item(), batch_image_names))
             progress.set_postfix_str("Iter[{}]: bce loss={:.5f}, dice loss={:.5f}, total loss={:.5f}".format(
                 it + 1, bce_loss, dice_loss, loss))
-            print("\nTrain Epoch[{}] Iter[{}] images: {}\n".format(epoch + 1, it + 1, batch_image_names))
-            # print("Top k images of BCE Loss: {}".format(bce_top_k_images))
-            # print("Top k images of Dice Loss: {}\n".format(dice_top_k_images))
+            # progress.set_postfix_str(
+            #     "Iter[{}]: bce loss={:.5f}, dice loss={:.5f}, total loss={:.5f}, reg loss={:.5f}, l2={:.3f}".format(
+            #         it + 1, bce_loss, dice_loss, loss, reg_loss, l2)
+            # )
+            print("\nTrain Epoch[{}] Iter[{}] images: {}".format(epoch + 1, it + 1, batch_image_names))
+            print("Top k images of BCE Loss: {}".format(bce_top_k_images))
+            print("Top k images of Dice Loss: {}\n".format(dice_top_k_images))
 
         # 当前迭代次数＝周期x批次总数+当前批次
         step = epoch * len(train_dataloader) + it
@@ -233,7 +253,7 @@ def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev, wtr):
                 # 二值图，非0即1
                 binary_pred = torch.zeros_like(pred)
                 # 概率超过预测阀值的认为是阳性区域
-                binary_pred[pred >= THRESH] = 1
+                binary_pred[pred > THRESH] = 1
 
                 # 将预测结果和标注mask拼接在一起：(3,1,H,W)
                 # 注意标注mask要先从(H,W)变为(1,1,H,W)并且转换为float32类型
@@ -244,17 +264,22 @@ def train_one_epoch(epoch, train_dataloader, net, optim, loss_func, dev, wtr):
 
     end_time = time.time()
     total_loss /= len(train_dataloader)
+    # total_reg_loss /= len(train_dataloader)
     total_bce_loss /= len(train_dataloader)
     total_dice_loss /= len(train_dataloader)
     # print("Epoch[{}]: loss={}, time used:{:.3f}s".format(epoch + 1, total_loss, end_time - start_time))
-    print("Epoch[{}]: bce loss={:.5f}, dice loss={:.5f}, loss={}, time used:{:.3f}s".format(
+    print("Epoch[{}]: bce loss={:.5f}, dice loss={:.5f}, loss={:.5f}, time used:{:.3f}s".format(
         epoch + 1, total_bce_loss, total_dice_loss, total_loss, end_time - start_time))
+    # print("Epoch[{}]: bce loss={:.5f}, dice loss={:.5f}, loss={:.5f}, reg loss={:.5f}, time used:{:.3f}s".format(
+    #     epoch + 1, total_bce_loss, total_dice_loss, total_loss, total_reg_loss, end_time - start_time))
     print('-' * 60, '\n')
 
     # 释放缓存的GPU资源
     torch.cuda.empty_cache()
 
+    # return total_loss
     return total_loss, total_bce_loss, total_dice_loss
+    # return total_reg_loss, total_loss, total_bce_loss, total_dice_loss
 
 
 def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
@@ -301,7 +326,7 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
                     label = label.unsqueeze(0).to(dev)
                     # (1,1,H,W)
                     output = net(image)
-                    # loss = criteria_func(output, label).detach().item()
+                    # loss, _ = criteria_func(output, label)
                     loss, bce_loss, dice_loss, _, _ = criteria_func(output, label)
                     dice = metric_func.get_dice(output, label)
                     batch_pos_num += 1
@@ -316,7 +341,7 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
                         pred = torch.sigmoid(output)
                         # 二值图
                         binary_pred = torch.zeros_like(pred)
-                        binary_pred[pred >= THRESH] = 1
+                        binary_pred[pred > THRESH] = 1
                         # (1,H,W)->(1,1,H,W)
                         mask = label.unsqueeze(0).float()
 
@@ -326,7 +351,7 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
 
             if it % LOG_CYCLE == 0:
                 batch_image_names = batch_data.get('image_name')
-                # progress.set_postfix_str("Iter[{}]: loss={:.3f}, dice={:.6f}, images:{}".format(
+                # progress.set_postfix_str("Iter[{}]: loss={:.5f}, dice={:.5f}, images:{}".format(
                 #     it + 1, batch_loss / batch_pos_num, batch_dice / batch_pos_num, batch_image_names))
                 progress.set_postfix_str("Iter[{}]: bce loss={:.5f}, dice loss={:.5f}, loss={:.5f}, "
                                          "dice={:.5f}".format(it + 1, batch_bce_loss / batch_pos_num,
@@ -347,7 +372,7 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
     total_bce_loss /= total_pos_num
     total_dice_loss /= total_pos_num
     total_dice /= total_pos_num
-    # print("Eval Epoch[{}]: loss={:.3f}, dice={:.3f}, time used:{:.3f}s".format(
+    # print("Eval Epoch[{}]: loss={:.5f}, dice={:.5f}, time used:{:.3f}s".format(
     #     epoch + 1, total_loss, total_dice, end_time - start_time))
     print("Eval Epoch[{}]: bce loss={:.5f}, dice loss={:.5f}, loss={}, dice={:.5f}, time used:{:.3f}s".format(
         epoch + 1, total_bce_loss, total_dice_loss, total_loss, total_dice, end_time - start_time))
@@ -356,6 +381,7 @@ def eval(epoch, eval_dataloader, net, criteria_func, dev, wtr):
     # 释放缓存的GPU资源
     torch.cuda.empty_cache()
 
+    # return total_loss, total_dice
     return total_loss, total_dice, total_bce_loss, total_dice_loss
 
 
@@ -377,21 +403,38 @@ if __name__ == '__main__':
 
     # 模型构建
     model = build_model(dev=device)
+    # # 打印层
+    # children = model.module.named_children() if GPU else model.named_children()
+    # print("Children:")
+    # for name, child in children:
+    #     print("#{}".format(name))
+    #     print(child)
+    #     print('-' * 50)
+    # print('\n')
+    # # 打印参数
+    # params = model.module.named_parameters() if GPU else model.named_parameters()
+    # print("Params:")
+    # for name, param in params:
+    #     print("#{}".format(name))
+    #     print(param)
+    #     print('-' * 50)
+    # print('\n')
+
     # 定制优化器和学习率策略
     optimizer, scheduler = set_optim(model)
 
     # 损失函数
     # criterion = Dice()
-
-    # 数据集mask中，0的区域约是1的区域的7.5倍，因此这里在BCE中设置类别1的loss是类别0的7.428倍
-    criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 7.428, device=device))
-    # # 数据集mask中，阳性样本0的区域约是1的区域的3.214倍，因此这里在BCE中设置类别1的loss是类别0的3.214倍
-    # criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 3.214, device=device))
-    # # 划分训练集（阴阳比10:1）后，在mask中，0的区域约是1的区域的3.636倍，因此这里在BCE中设置类别1的loss是类别0的3.636倍
+    # criterion = BCEDice()
+    # # 数据集mask中，0的区域约是1的区域的7.5倍，因此这里在BCE中设置类别1的loss是类别0的7.428倍
+    # criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 7.428, device=device))
+    # # 数据集mask中，平均每个阳性样本0的区域约是1的区域的4.464倍，因此这里在BCE中设置类别1的loss是类别0的4.5倍
+    # criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 4.5, device=device))
+    # # 划分训练集（阴阳比1:10）后，在mask中，0的区域约是1的区域的3.636倍，因此这里在BCE中设置类别1的loss是类别0的3.636倍
     # criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 3.636, device=device))
-
     # # OHEM, 使用前75%的困难样本进行学习
-    # criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 3., device=device), ohem=True, top_k_ratio=.75)
+    print("#Switch to OHEM mode, topK ratio=75%\n")
+    criterion = BCEDice(pos_weight=torch.full((NUM_CLASSES,), 7.428, device=device), ohem=True, top_k_ratio=.75)
 
     # 可视化
     train_wtr = SummaryWriter(os.path.join(VISUAL_DIR, 'Train'))
@@ -417,8 +460,12 @@ if __name__ == '__main__':
         # epoch_loss = train_one_epoch(epoch, train_dl, model, optimizer, criterion, device, train_wtr)
         epoch_loss, epoch_bce_loss, epoch_dice_loss = train_one_epoch(epoch, train_dl, model, optimizer, criterion,
                                                                       device, train_wtr)
+        # epoch_reg_loss, epoch_loss, epoch_bce_loss, epoch_dice_loss = train_one_epoch(
+        #     epoch, train_dl, model, optimizer, criterion, device, train_wtr
+        # )
         # 可视化loss曲线
         train_wtr.add_scalar('loss', epoch_loss, epoch)
+        # train_wtr.add_scalar('reg loss', epoch_reg_loss, epoch)
         train_wtr.add_scalar('bce loss', epoch_bce_loss, epoch)
         train_wtr.add_scalar('dice loss', epoch_dice_loss, epoch)
 

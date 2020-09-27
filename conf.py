@@ -27,11 +27,11 @@ TINY_SIZE = (372, 256)
 TRAIN_MEAN = [208.644, 184.249, 206.240]
 TRAIN_STD = [54.267, 77.503, 51.150]
 # 训练集(阴阳比1:1)缩放后图像像素均值与标准差(RGB)
-# TRAIN_SCALE_MEAN = [.773, .619, .751]
-# TRAIN_SCALE_STD = [.220, .304, .202]
+TRAIN_SCALE_MEAN = [.772, .617, .751]
+TRAIN_SCALE_STD = [.221, .305, .203]
 # 训练集(阴阳比1:1)数据增强后图像像素均值与标准差(RGB)
-TRAIN_SCALE_MEAN = [.768, .621, .744]
-TRAIN_SCALE_STD = [.243, .322, .230]
+# TRAIN_SCALE_MEAN = [.768, .621, .744]
+# TRAIN_SCALE_STD = [.243, .322, .230]
 # 训练集(阴阳比=1:10)缩放后图像像素均值与标准差(RGB)
 # TRAIN_SCALE_MEAN = [.769, .625, .751]
 # TRAIN_SCALE_STD = [.230, .322, .213]
@@ -52,22 +52,24 @@ EPOCHS = 300
 # 前5个周期对学习率使用warm-up策略
 WARM_UP_EPOCH = 5
 BATCH_SIZE = 8
-BASE_LR = 5e-3
-MIN_LR = 1e-4
+BASE_LR = 1e-3
+MIN_LR = 5e-5
+WEIGHT_DECAY = 1e-4
 NUM_CLASSES = 1
 # 预测概率阀值
 THRESH = .5
 # 是否使用预训练权重
-PRETRAINED = False
+PRETRAINED = True
 # 模型权重文件路径
 CHECKPOINT = 'Weights/'
+WEIGHT = 'Weights/epoch160_best_0.63927.pt'
 # 是否使用同步BatchNorm
-SYN_BN = False
+SYN_BN = True
 
 # 打印log的迭代周期
 LOG_CYCLE = 3
-# 每10次迭代可视化预测概率图
-VIS_CYCLE = 10
+# 每20次迭代可视化预测概率图
+VIS_CYCLE = 20
 # 训练过程中进行评估验证的周期
 TIME_TO_EVAL = 10
 
